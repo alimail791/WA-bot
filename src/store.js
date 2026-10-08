@@ -106,6 +106,8 @@ export async function connect() {
       d.collection('tokens').createIndex({ token: 1 }, { unique: true }),
       d.collection('orders').createIndex({ providerId: 1 }),
       d.collection('questions').createIndex({ product: 1, subject: 1 }),
+      d.collection('questions').createIndex({ sourceTestId: 1 }),
+      d.collection('tests').createIndex({ tmId: 1 }),
       d.collection('tests').createIndex({ code: 1 }, { unique: true }),
       d.collection('classes').createIndex({ code: 1 }, { unique: true }),
       d.collection('attempts').createIndex({ testId: 1, score: -1 }),
@@ -117,3 +119,8 @@ export async function connect() {
 }
 
 export async function close() { if (client) await client.close(); }
+
+// Another database on the same MongoDB cluster (e.g. TestMandi's own "testmandi" database)
+export function otherDb(name) {
+  return client ? client.db(name) : null;
+}

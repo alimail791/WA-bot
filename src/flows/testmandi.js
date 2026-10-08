@@ -2,7 +2,10 @@
 // Funnel: seller's share link ("TEST CODE") or the catalogue (categories, search, pages) → test card with real
 //         rating/attempts → free sample in chat → UPI purchase → magic link → rank among buyers → rating → more tests.
 // Refer & earn: buyers invite friends ("TREF CODE": friend gets ₹ off, inviter gets wallet credit);
-//               sellers invite teachers ("SREF CODE": inviter earns a % of the new seller's sales).
+//               sellers invite teachers ("SREF CODE"). For sellers synced from testmandi.in the code is their
+//               TestMandi referral code and TestMandi's own seller programme pays the bonus; bot-only sellers
+//               earn a % of the invited seller's WhatsApp sales instead.
+// Tests synced from testmandi.in record every WhatsApp sale in TestMandi, so sellers are paid via TestMandi payouts.
 // Sellers: instant sale alerts with their share, "SELLER" shows earnings and share links.
 import { db } from '../store.js';
 import { config } from '../config.js';
@@ -13,6 +16,7 @@ import { rupees } from '../products.js';
 import { maskPhone, fmtNum, waLink, istDate, refCodeFor, DAY } from '../util.js';
 import { within24h } from '../engine.js';
 import { startChatQuiz, answerQuestion, pendingOrder } from './common.js';
+import { recordSaleInTestMandi } from '../testmandiSync.js';
 
 const shareLink = (code) => waLink(config.wa.displayNumbers.testmandi, `TEST ${code}`);
 const rating = (t) => (t.ratingCount >= 5 ? `⭐ ${(t.ratingSum / t.ratingCount).toFixed(1)} (${fmtNum(t.ratingCount)})` : '🆕 New');
@@ -35,7 +39,7 @@ export async function handle(ctx, input) {
   // Referral links
   const tref = upper.match(/\bTREF\s+([A-Z0-9]{6})\b/);
   if (tref) return joinAsBuyer(ctx, tref[1]);
-  const sref = upper.match(/\bSREF\s+([A-Z0-9]{6})\b/);
+  const sref = upper.match(/\bSREF\s+([A-Z0-9]{4,10})\b/);
   if (sref) return joinAsSeller(ctx, sref[1]);
 
   const m = upper.match(/^(?:TEST|BUY)\s+([A-Z0-9-]{3,})/);
@@ -56,6 +60,7 @@ export async function handle(ctx, input) {
     if (cmd === 'start') return sendLink(ctx, a);
     if (cmd === 'rate') return rate(ctx, a, Number(b));
     if (cmd === 'browse') return browse(ctx);
+    if (cmd === 'cats') return browse(ctx, Number(a) || 0);
     if (cmd === 'cat') return listTests(ctx, decodeURIComponent(a), Number(b) || 0);
     if (cmd === 'pop') return listTests(ctx, null, Number(a) || 0);
     if (cmd === 'search') { await ctx.go('await_search'); return ctx.say('🔍 Type what you\'re looking for, like "SSC GK", "NEET biology" or a teacher\'s name.'); }
@@ -98,20 +103,26 @@ async function moreMenu(ctx) {
 }
 
 // ---- Catalogue ----------------------------------------------------------
-async function browse(ctx) {
+async function browse(ctx, page = 0) {
   await ctx.go('idle');
   const tests = await db.tests.find(LISTED);
   if (!tests.length) return ctx.say('No tests are listed yet. Check back soon!');
   const counts = {};
   for (const t of tests) { const c = t.category || 'Other'; counts[c] = (counts[c] || 0) + 1; }
-  const cats = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const cats = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (cats.length <= 1) return listTests(ctx, null, 0);
+  // 10 rows max: first page has Popular + Search, every page may have "More categories"
+  const perPage = page === 0 ? 7 : 8;
+  const start = page === 0 ? 0 : 7 + (page - 1) * 8;
+  const slice = cats.slice(start, start + perPage);
+  const more = start + perPage < cats.length;
   const rows = [
-    { id: 'tm:pop:0', title: '🔥 Most popular', description: `Top tests across all ${fmtNum(tests.length)}` },
-    ...cats.slice(0, 8).map(([c, n]) => ({ id: `tm:cat:${encodeURIComponent(c)}:0`, title: c, description: `${n} test${n > 1 ? 's' : ''}` })),
-    { id: 'tm:search', title: '🔍 Search', description: 'Type an exam, subject or teacher' },
+    ...(page === 0 ? [{ id: 'tm:pop:0', title: '🔥 Most popular', description: `Top tests across all ${fmtNum(tests.length)}` }] : []),
+    ...slice.map(([c, n]) => ({ id: `tm:cat:${encodeURIComponent(c)}:0`, title: c, description: `${n} test${n > 1 ? 's' : ''}` })),
+    ...(more ? [{ id: `tm:cats:${page + 1}`, title: '➡️ More categories', description: `${cats.length - start - perPage} more exams` }] : []),
+    page === 0 ? { id: 'tm:search', title: '🔍 Search', description: 'Type an exam, subject or teacher' } : { id: 'tm:cats:0', title: '⬅️ Back to start' },
   ];
-  await ctx.list(`📚 ${fmtNum(tests.length)} tests on TestMandi. Pick a category:`, 'Categories', [{ title: 'Categories', rows }]);
+  await ctx.list(page === 0 ? `📚 ${fmtNum(tests.length)} tests in ${cats.length} exams. Pick one, or search:` : `More exams (page ${page + 1}):`, 'Categories', [{ title: 'Exams', rows }]);
 }
 
 async function listTests(ctx, category, page) {
@@ -261,6 +272,10 @@ export async function onPaid(ctx, order) {
     await sendLink(ctx, code);
   }
   if (listPrice > 0) {
+    if (item.tmId) {
+      try { await recordSaleInTestMandi({ item, phone: ctx.phone, listPrice, paymentId: order.paymentId }); }
+      catch (e) { console.error('[testmandi] could not record sale in TestMandi', order._id, e); }
+    }
     await rewardBuyerReferrer(ctx, firstPurchase);
     await notifySeller(sellerPhone, item, listPrice);
   }
@@ -301,6 +316,7 @@ async function notifySeller(sellerPhone, item, listPrice) {
 // The teacher who invited this seller earns a % of their sales for a limited time
 async function sellerReferralBonus(seller, item, listPrice) {
   const r = (await import('../products.js')).products.testmandi.referral;
+  if (item.source === 'testmandi') return; // TestMandi's own seller programme handles these
   if (!seller.sellerReferredBy || !seller.sellerReferredAt) return;
   if (Date.now() - new Date(seller.sellerReferredAt).getTime() > r.sellerBonusDays * DAY) return;
   const bonus = round2(listPrice * r.sellerBonusPct);
@@ -327,6 +343,11 @@ async function joinAsBuyer(ctx, code) {
 
 async function joinAsSeller(ctx, code) {
   const u = ctx.user;
+  const tmInviter = await db.users.findOne({ product: 'testmandi', tmReferralCode: code });
+  if (tmInviter) {
+    await ctx.setUser({ tmInviteCode: code });
+    return ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale, on the website and here on WhatsApp\n• Students buy from your WhatsApp test link in one tap\n• Payouts straight to your bank from your TestMandi dashboard\n\nSign up as a seller at ${ctx.cfg.webBase}:\n1. Use this WhatsApp number as your phone, so sale alerts reach you here\n2. Enter referral code *${code}* so ${tmInviter.tmName || 'the teacher who invited you'} gets credit`);
+  }
   const inviter = await db.users.findOne({ product: 'testmandi', refCode: code });
   const alreadySelling = await db.tests.count({ sellerPhone: ctx.phone });
   if (inviter && inviter.phone !== ctx.phone && !u.sellerReferredBy && !alreadySelling) {
@@ -400,7 +421,7 @@ async function myTests(ctx) {
 // ---- Sellers ----------------------------------------------------------------
 async function sellInfo(ctx) {
   const invited = ctx.user.sellerReferredBy ? '\n\n🤝 Your invite is saved. Start selling and your inviter gets a small bonus from TestMandi; your share stays the same.' : '';
-  await ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale\n• Each test gets a WhatsApp link students can buy from in one tap\n• Instant sale alerts and weekly UPI payouts\n\nSign up as a seller at ${ctx.cfg.webBase}, using this WhatsApp number.${invited}`);
+  await ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale\n• Each test gets a WhatsApp link students can buy from in one tap\n• Instant sale alerts and weekly UPI payouts\n\nSign up as a seller at ${ctx.cfg.webBase}, using this WhatsApp number as your phone so sale alerts reach you here.${invited}`);
 }
 
 async function sellerStats(ctx) {
@@ -411,13 +432,20 @@ async function sellerStats(ctx) {
   const today = s.day === istDate() ? s : { todaySales: 0, todayEarnings: 0 };
   const invited = await db.users.count({ product: 'testmandi', sellerReferredBy: ctx.phone });
   const lines = [
-    '💰 Your TestMandi sales',
+    ctx.user.tmEmail ? '💰 Your sales on WhatsApp\n(Website sales and payouts: your TestMandi dashboard.)' : '💰 Your TestMandi sales',
     `Today: ${today.todaySales} sales · ${rupees(today.todayEarnings || 0)}`,
     `All time: ${s.sales || 0} sales · ${rupees(s.earnings || 0)}`,
   ];
   if (s.referralEarnings) lines.push(`Of which referral bonus: ${rupees(s.referralEarnings)}`);
   lines.push('', 'Share links (post these in your groups):', ...tests.slice(0, 8).map((t) => `• ${t.title} (${t.salesCount || 0} sold)\n  ${shareLink(t.code) || 'TEST ' + t.code}`));
   await ctx.say(lines.join('\n'));
+  if (ctx.user.tmReferralCode) {
+    const code = ctx.user.tmReferralCode;
+    const tmLink = waLink(config.wa.displayNumbers.testmandi, `Hi SREF ${code}`);
+    await ctx.say(`🤝 Invite teachers and students with your TestMandi code *${code}*\n• ₹200 when a teacher you invite publishes their first test\n• ₹200 when a student you invite makes their first purchase on testmandi.in\nBonuses are added to your TestMandi payouts.\n\nForward this to teachers 👇`);
+    await ctx.say(`I sell my mock tests on TestMandi. Students buy them on the website and right on WhatsApp, and teachers keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale. Join with my code ${code}: ${tmLink || ctx.cfg.webBase}`);
+    return;
+  }
   const link = waLink(config.wa.displayNumbers.testmandi, `Hi SREF ${ctx.user.refCode}`);
   await ctx.say(`🤝 Invite other teachers to sell on TestMandi\nYou earn ${Math.round(r.sellerBonusPct * 100)}% of their sales for ${Math.round(r.sellerBonusDays / 30)} months. It comes from TestMandi's share, so they still keep ${Math.round(ctx.cfg.sellerShare * 100)}%.\nTeachers invited: ${invited}\n\nForward this to teachers 👇`);
   await ctx.say(`I sell my mock tests on TestMandi and students buy them right on WhatsApp. Teachers keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale. Join with my link: ${link || 'message TestMandi and send SREF ' + ctx.user.refCode}`);

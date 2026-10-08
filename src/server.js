@@ -3,6 +3,7 @@ import { connect } from './store.js';
 import { createApp } from './app.js';
 import { seed } from './seed.js';
 import { startCron } from './nudges.js';
+import * as tmSync from './testmandiSync.js';
 
 await connect();
 if (config.store === 'memory' || process.env.SEED_SAMPLE === 'true') {
@@ -10,6 +11,7 @@ if (config.store === 'memory' || process.env.SEED_SAMPLE === 'true') {
   if (await seed({ withTests })) console.log(withTests ? 'Loaded sample questions and tests' : 'Loaded sample questions');
 }
 if (config.enableCron) startCron();
+if (tmSync.enabled() && config.store === 'mongo') tmSync.startSync(Number(process.env.TESTMANDI_SYNC_MINUTES || 15));
 
 createApp().listen(config.port, () => {
   console.log(`wa-engine on ${config.baseUrl} · provider=${config.provider} · store=${config.store}`);

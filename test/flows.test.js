@@ -403,3 +403,60 @@ test('ClassCoach referral: friend gets ₹50 off, inviter gets 30 days Pro', asy
   assert.ok(new Date(ua.plan.until) - Date.now() > 29 * 86400e3);
   assert.match(textOf(fresh(P, a)), /30 days of Pro free/);
 });
+
+test('TestMandi sync: tests, bundles and sellers come from testmandi.in; WhatsApp sales are recorded there', async () => {
+  const sync = await import('../src/testmandiSync.js');
+  const q = (text, correct) => ({ text, options: ['A1', 'B2', 'C3', 'D4'], correct, topic: 'Topic ' + correct, explanation: 'because' });
+  const source = {
+    sellerSharePercent: 70,
+    users: [{ email: 'raise@tm.in', phone: '98765 43210', role: 'seller', referralCode: 'RAIS1234', businessName: 'Raise' }],
+    tests: [
+      { id: 't_100', title: 'NEET Physics Chapter 1', category: 'NEET', price: 49, duration: 20, sellerEmail: 'raise@tm.in', sellerName: 'Raise', rating: 4.5, ratingCount: 20, questions: [q('Q1?', 0), q('Q2?', 1), q('Q3?', 2)] },
+      { id: 't_101', title: 'NEET Free Starter', category: 'NEET', price: 0, duration: 10, sellerEmail: 'raise@tm.in', sellerName: 'Raise', rating: 0, ratingCount: 0, questions: [q('F1?', 3)] },
+      { id: 't_102', title: 'Bad Test', category: 'JEE Main', price: 10, duration: 10, sellerEmail: 'raise@tm.in', rating: 2, ratingCount: 50, questions: [q('B?', 0)] },
+    ],
+    bundles: [{ id: 'b_1', title: 'NEET Starter Pack', price: 39, testIds: ['t_100', 't_101'], sellerEmail: 'raise@tm.in', sellerName: 'Raise' }],
+  };
+  let r = await sync.syncFrom(source);
+  assert.equal(r.created, 3);
+  const code = sync.codeFor('t_100');
+  const t = await db.tests.findOne({ code });
+  assert.equal(t.title, 'NEET Physics Chapter 1');
+  assert.equal(t.sellerPhone, '919876543210');
+  assert.equal(t.qids.length, 3);
+  assert.equal((await db.tests.findOne({ tmId: 't_102' })).listed, false, 'low-rated tests hidden, like on the website');
+  // re-sync without changes keeps questions; removing a test unlists it
+  r = await sync.syncFrom({ ...source, tests: source.tests.slice(0, 2) });
+  assert.equal(r.questionsWritten, 0);
+  // Buy over WhatsApp → sale recorded in TestMandi purchases at list price
+  const sales = [];
+  sync.setSaleSink((coll, rec) => sales.push({ coll, rec }));
+  const P = 'testmandi', ph = '919000000300';
+  await say(P, ph, 'Hi');
+  const m = await say(P, ph, '', `tm:buy:${code}`);
+  await payLink(lastLink(m).url);
+  assert.equal(sales.length, 1);
+  assert.equal(sales[0].coll, 'purchases');
+  assert.equal(sales[0].rec.testId, 't_100');
+  assert.equal(sales[0].rec.price, 49);
+  assert.equal(sales[0].rec.buyerEmail, '919000000300@whatsapp.testmandi.in');
+  // Seller sees TestMandi referral code; teacher invited with it gets sign-up steps
+  const s = await say(P, '919876543210', 'SELLER');
+  assert.match(textOf(s), /RAIS1234/);
+  const inv = await say(P, '919000000301', 'Hi SREF RAIS1234');
+  assert.match(textOf(inv), /Enter referral code \*RAIS1234\*/);
+  sync.setSaleSink(null);
+});
+
+test('TestMandi category list pages when there are many exams', async () => {
+  const qids = (await db.tests.findOne({ code: 'SSC-GK-101' })).qids;
+  for (let i = 0; i < 15; i++) await db.tests.insertOne({ code: `CAT-${i}`, title: `Exam ${i} Mock`, category: `Exam ${String(i).padStart(2, '0')}`, type: 'test', price: 5, durationMin: 5, qids, sellerName: 'X', attemptsCount: 0, ratingSum: 0, ratingCount: 0 });
+  const P = 'testmandi', ph = '919000000310';
+  let m = await say(P, ph, 'BROWSE');
+  const rows = m.at(-1).sections[0].rows;
+  assert.ok(rows.length <= 10);
+  assert.ok(rows.some((r) => r.id === 'tm:cats:1'));
+  m = await say(P, ph, '', 'tm:cats:1');
+  assert.match(textOf(m), /More exams \(page 2\)/);
+  await db.tests.deleteMany({ code: { $in: Array.from({ length: 15 }, (_, i) => `CAT-${i}`) } });
+});

@@ -35,6 +35,8 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 People get their link by sending `REFER` (TestMandi sellers: `SELLER`).
 
 ### TestMandi catalogue
+With `TESTMANDI_SYNC=true` the bot copies every test, bundle, price, rating and question from testmandi.in (database `TESTMANDI_DB` on the same cluster) at start-up and every 15 minutes. Each test gets a short WhatsApp code (`TEST K7QM2X`). Every WhatsApp sale is written to TestMandi's `purchases` / `bundlePurchases` at the list price (buyer shown as `<phone>@whatsapp.testmandi.in`), so it counts in the seller's normal TestMandi payout. Sellers are matched by the phone on their TestMandi account; their referral code is TestMandi's own, and TestMandi's ₹200 seller programme pays those bonuses.
+
 `BROWSE` (or the Browse button) shows categories with test counts, then 8 tests per page with "More tests". `SEARCH ssc gk` searches titles, categories and teacher names. Tests priced ₹0 open straight away with no payment. Give each test a `category` when creating it (SSC, NEET, TNPSC, Banking…).
 
 Prices and limits are in `src/products.js`. Change them there.
