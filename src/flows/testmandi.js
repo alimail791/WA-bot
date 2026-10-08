@@ -1,6 +1,8 @@
 // TestMandi: test marketplace flow.
-// Funnel: seller's share link ("TEST CODE") → test card with real rating/attempts → free sample in chat
-//         → UPI purchase → magic link → result with rank among buyers → rating → seller's bundle / similar tests.
+// Funnel: seller's share link ("TEST CODE") or the catalogue (categories, search, pages) → test card with real
+//         rating/attempts → free sample in chat → UPI purchase → magic link → rank among buyers → rating → more tests.
+// Refer & earn: buyers invite friends ("TREF CODE": friend gets ₹ off, inviter gets wallet credit);
+//               sellers invite teachers ("SREF CODE": inviter earns a % of the new seller's sales).
 // Sellers: instant sale alerts with their share, "SELLER" shows earnings and share links.
 import { db } from '../store.js';
 import { config } from '../config.js';
@@ -8,17 +10,21 @@ import { createMagicLink } from '../magic.js';
 import { createOrder } from '../payments.js';
 import { send } from '../providers/index.js';
 import { rupees } from '../products.js';
-import { maskPhone, fmtNum, waLink, istDate } from '../util.js';
+import { maskPhone, fmtNum, waLink, istDate, refCodeFor, DAY } from '../util.js';
 import { within24h } from '../engine.js';
 import { startChatQuiz, answerQuestion, pendingOrder } from './common.js';
 
 const shareLink = (code) => waLink(config.wa.displayNumbers.testmandi, `TEST ${code}`);
-const rating = (t) => (t.ratingCount >= 5 ? `⭐ ${(t.ratingSum / t.ratingCount).toFixed(1)} (${fmtNum(t.ratingCount)} ratings)` : '🆕 New test');
+const rating = (t) => (t.ratingCount >= 5 ? `⭐ ${(t.ratingSum / t.ratingCount).toFixed(1)} (${fmtNum(t.ratingCount)})` : '🆕 New');
 const owns = (u, code) => (u.purchases || []).includes(code);
+const priceTag = (p) => (p > 0 ? rupees(p) : 'FREE');
+const LISTED = { type: { $ne: 'bundle' }, listed: { $ne: false } };
+const round2 = (n) => Math.round(n * 100) / 100;
 
 export async function handle(ctx, input) {
-  const { replyId, upper } = input;
+  const { replyId, upper, text } = input;
   const state = ctx.session.data?.state;
+  if (!ctx.user.refCode) await ctx.setUser({ refCode: refCodeFor('testmandi', ctx.phone) });
 
   if (replyId.startsWith('ans:') && state === 'quiz') {
     const done = await answerQuestion(ctx, replyId);
@@ -26,12 +32,23 @@ export async function handle(ctx, input) {
     return;
   }
 
+  // Referral links
+  const tref = upper.match(/\bTREF\s+([A-Z0-9]{6})\b/);
+  if (tref) return joinAsBuyer(ctx, tref[1]);
+  const sref = upper.match(/\bSREF\s+([A-Z0-9]{6})\b/);
+  if (sref) return joinAsSeller(ctx, sref[1]);
+
   const m = upper.match(/^(?:TEST|BUY)\s+([A-Z0-9-]{3,})/);
   if (m) return showTest(ctx, m[1]);
   if (upper === 'SELLER' || upper === 'MY SALES') return sellerStats(ctx);
+  if (upper === 'REFER' || upper === 'WALLET') return referBuyer(ctx);
+  if (upper === 'BROWSE' || upper === 'TESTS') return browse(ctx);
+  const search = upper.match(/^(?:SEARCH|FIND)\s+(.+)/);
+  if (search) return runSearch(ctx, text.slice(text.indexOf(' ') + 1));
+  if (state === 'await_search' && text && !replyId) return runSearch(ctx, text);
 
-  const [cmd, a, b] = replyId.split(':').slice(1);
   if (replyId.startsWith('tm:')) {
+    const [, cmd, a, b] = replyId.split(':');
     if (cmd === 'card') return showTest(ctx, a);
     if (cmd === 'sample') return startSample(ctx, a);
     if (cmd === 'buy') return buy(ctx, a);
@@ -39,7 +56,12 @@ export async function handle(ctx, input) {
     if (cmd === 'start') return sendLink(ctx, a);
     if (cmd === 'rate') return rate(ctx, a, Number(b));
     if (cmd === 'browse') return browse(ctx);
+    if (cmd === 'cat') return listTests(ctx, decodeURIComponent(a), Number(b) || 0);
+    if (cmd === 'pop') return listTests(ctx, null, Number(a) || 0);
+    if (cmd === 'search') { await ctx.go('await_search'); return ctx.say('🔍 Type what you\'re looking for, like "SSC GK", "NEET biology" or a teacher\'s name.'); }
     if (cmd === 'mine') return myTests(ctx);
+    if (cmd === 'more') return moreMenu(ctx);
+    if (cmd === 'refer') return referBuyer(ctx);
     if (cmd === 'sell') return sellInfo(ctx);
     if (cmd === 'sales') return sellerStats(ctx);
   }
@@ -50,16 +72,82 @@ export async function handle(ctx, input) {
 }
 
 async function menu(ctx) {
-  const isSeller = await db.tests.count({ sellerPhone: ctx.phone });
-  await ctx.buttons(
-    `${ctx.isNew ? 'Welcome to TestMandi! 👋\nMock tests from top teachers, right here on WhatsApp.\nYour number ' + maskPhone(ctx.phone) + ' is your account.' : 'Hi! 👋'}\n\nWhat would you like to do?`,
-    [['tm:browse', '🔎 Browse tests'], ['tm:mine', '📚 My tests'], isSeller ? ['tm:sales', '💰 My sales'] : ['tm:sell', 'Sell your tests']],
-  );
+  const n = await db.tests.count(LISTED);
+  const wallet = ctx.user.wallet || 0;
+  const lines = [ctx.isNew
+    ? `Welcome to TestMandi! 👋\nMock tests from top teachers, right here on WhatsApp.\nYour number ${maskPhone(ctx.phone)} is your account.`
+    : 'Hi! 👋'];
+  if (n >= 5) lines.push(`${fmtNum(n)} tests available.`);
+  if (wallet > 0) lines.push(`💰 Wallet: ${rupees(wallet)}, used automatically on your next test.`);
+  lines.push('', 'What would you like to do?');
+  await ctx.buttons(lines.join('\n'), [['tm:browse', '🔎 Browse tests'], ['tm:mine', '📚 My tests'], ['tm:more', '⭐ More']]);
 }
 
+async function moreMenu(ctx) {
+  const isSeller = await db.tests.count({ sellerPhone: ctx.phone });
+  const r = ctx.cfg.referral;
+  await ctx.list('More options', 'Open', [{
+    title: 'TestMandi', rows: [
+      { id: 'tm:refer', title: '🎁 Refer & earn', description: `Friends get ${rupees(r.friendDiscount)} off, you get ${rupees(r.buyerReward)} per friend` },
+      { id: 'tm:search', title: '🔍 Search tests', description: 'Find by exam, subject or teacher' },
+      isSeller
+        ? { id: 'tm:sales', title: '💰 My sales', description: 'Earnings, share links, invite teachers' }
+        : { id: 'tm:sell', title: '🧑‍🏫 Sell your tests', description: `Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale` },
+    ],
+  }]);
+}
+
+// ---- Catalogue ----------------------------------------------------------
+async function browse(ctx) {
+  await ctx.go('idle');
+  const tests = await db.tests.find(LISTED);
+  if (!tests.length) return ctx.say('No tests are listed yet. Check back soon!');
+  const counts = {};
+  for (const t of tests) { const c = t.category || 'Other'; counts[c] = (counts[c] || 0) + 1; }
+  const cats = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (cats.length <= 1) return listTests(ctx, null, 0);
+  const rows = [
+    { id: 'tm:pop:0', title: '🔥 Most popular', description: `Top tests across all ${fmtNum(tests.length)}` },
+    ...cats.slice(0, 8).map(([c, n]) => ({ id: `tm:cat:${encodeURIComponent(c)}:0`, title: c, description: `${n} test${n > 1 ? 's' : ''}` })),
+    { id: 'tm:search', title: '🔍 Search', description: 'Type an exam, subject or teacher' },
+  ];
+  await ctx.list(`📚 ${fmtNum(tests.length)} tests on TestMandi. Pick a category:`, 'Categories', [{ title: 'Categories', rows }]);
+}
+
+async function listTests(ctx, category, page) {
+  const size = ctx.cfg.pageSize;
+  const filter = category ? { ...LISTED, category: category === 'Other' ? { $exists: false } : category } : LISTED;
+  const tests = await db.tests.find(filter, { sort: { attemptsCount: -1 }, skip: page * size, limit: size + 1 });
+  if (!tests.length) return page ? listTests(ctx, category, 0) : browse(ctx);
+  const hasMore = tests.length > size;
+  const total = await db.tests.count(filter);
+  const rows = tests.slice(0, size).map((t) => ({ id: `tm:card:${t.code}`, title: t.title, description: `${priceTag(t.price)} · ${t.sellerName} · ${rating(t)}` }));
+  if (hasMore) rows.push({ id: category ? `tm:cat:${encodeURIComponent(category)}:${page + 1}` : `tm:pop:${page + 1}`, title: '➡️ More tests', description: `Showing ${page * size + 1}–${page * size + size} of ${total}` });
+  rows.push({ id: 'tm:browse', title: '⬅️ All categories' });
+  await ctx.list(`${category || '🔥 Most popular'}${page ? ` · page ${page + 1}` : ''}\nTap a test to see details and try free questions.`, 'See tests', [{ title: (category || 'Popular').slice(0, 24), rows }]);
+}
+
+async function runSearch(ctx, query) {
+  await ctx.go('idle');
+  const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return browse(ctx);
+  const all = await db.tests.find(LISTED, { sort: { attemptsCount: -1 } });
+  const hits = all.filter((t) => {
+    const hay = `${t.title} ${t.category || ''} ${t.sellerName || ''} ${t.code}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  }).slice(0, 9);
+  await ctx.track('search', { q: String(query).slice(0, 60), hits: hits.length });
+  if (!hits.length) return ctx.buttons(`No tests found for "${query}". Try a shorter word, like the exam name.`, [['tm:search', '🔍 Search again'], ['tm:browse', '📚 Categories']]);
+  await ctx.list(`🔍 ${hits.length} test${hits.length > 1 ? 's' : ''} for "${query}":`, 'See tests', [{ title: 'Results', rows: [
+    ...hits.map((t) => ({ id: `tm:card:${t.code}`, title: t.title, description: `${priceTag(t.price)} · ${t.sellerName} · ${rating(t)}` })),
+    { id: 'tm:browse', title: '⬅️ All categories' },
+  ] }]);
+}
+
+// ---- Test card and purchase ----------------------------------------------
 async function showTest(ctx, code) {
   const t = await db.tests.findOne({ code });
-  if (!t) return ctx.say(`I couldn't find test "${code}". Check the code, or send MENU to browse tests.`);
+  if (!t) return ctx.say(`I couldn't find test "${code}". Check the code, or send BROWSE to see all tests.`);
   if (t.type === 'bundle') return showBundle(ctx, t);
   await ctx.track('test_view', { code });
   if (owns(ctx.user, code)) {
@@ -72,22 +160,39 @@ async function showTest(ctx, code) {
     `${t.qids.length} questions · ${t.durationMin} min${t.language ? ' · ' + t.language : ''}`,
   ];
   if (t.attemptsCount >= 10) lines.push(`${fmtNum(t.attemptsCount)} students have taken it`);
-  lines.push('', `Price: ${t.anchor ? `${rupees(t.price)} (was ${rupees(t.anchor)})` : rupees(t.price)}`, 'Includes explanations and your rank among all buyers.');
+  if (t.price > 0) {
+    lines.push('', `Price: ${t.anchor ? `${rupees(t.price)} (was ${rupees(t.anchor)})` : rupees(t.price)}`);
+    const { discount, walletUse, pay } = priceFor(ctx, t.price);
+    if (discount) lines.push(`🎁 Your friend's invite: ${rupees(discount)} off`);
+    if (walletUse) lines.push(`💰 Wallet: −${rupees(walletUse)}`);
+    if (discount || walletUse) lines.push(`You pay: ${priceTag(pay)}`);
+  } else lines.push('', 'Price: FREE 🎉');
+  lines.push('Includes explanations and your rank among everyone who took it.');
   const bundle = await db.tests.findOne({ type: 'bundle', testCodes: code });
   const btns = [];
-  if (ctx.cfg.freeSample > 0 && !(ctx.user.sampled || []).includes(code)) btns.push([`tm:sample:${code}`, `Try ${Math.min(ctx.cfg.freeSample, t.qids.length)} free Qs`]);
-  btns.push([`tm:buy:${code}`, `Buy · ${rupees(t.price)}`]);
+  if (t.price > 0 && ctx.cfg.freeSample > 0 && !(ctx.user.sampled || []).includes(code)) btns.push([`tm:sample:${code}`, `Try ${Math.min(ctx.cfg.freeSample, t.qids.length)} free Qs`]);
+  btns.push([`tm:buy:${code}`, t.price > 0 ? `Buy · ${priceTag(priceFor(ctx, t.price).pay)}` : '▶️ Start free test']);
   if (bundle) btns.push([`tm:card:${bundle.code}`, `🎁 Pack of ${bundle.testCodes.length}`]);
   await ctx.buttons(lines.join('\n'), btns);
+}
+
+// Friend discount (first purchase only) then wallet credit
+function priceFor(ctx, price) {
+  const u = ctx.user;
+  const firstBuy = !(u.purchases || []).length;
+  const discount = price > 0 && u.referredBy && !u.refDiscountUsed && firstBuy ? Math.min(ctx.cfg.referral.friendDiscount, price) : 0;
+  const walletUse = Math.min(u.wallet || 0, price - discount);
+  return { discount, walletUse, pay: round2(price - discount - walletUse) };
 }
 
 async function showBundle(ctx, b) {
   const tests = await db.tests.find({ code: { $in: b.testCodes } });
   const total = tests.reduce((s, t) => s + t.price, 0);
   const save = total - b.price;
+  const { pay } = priceFor(ctx, b.price);
   await ctx.buttons(
-    `🎁 ${b.title}\nBy ${b.sellerName}\n${tests.map((t) => '• ' + t.title).join('\n')}\n\nPack price: ${rupees(b.price)}${save > 0 ? `\nBought one by one: ${rupees(total)}. You save ${rupees(save)}.` : ''}`,
-    [[`tm:bundle:${b.code}`, `Buy pack · ${rupees(b.price)}`], ...(tests[0] ? [[`tm:card:${tests[0].code}`, 'See single test']] : [])],
+    `🎁 ${b.title}\nBy ${b.sellerName}\n${tests.map((t) => '• ' + t.title).join('\n')}\n\nPack price: ${rupees(b.price)}${save > 0 ? `\nBought one by one: ${rupees(total)}. You save ${rupees(save)}.` : ''}${pay !== b.price ? `\nYou pay: ${priceTag(pay)}` : ''}`,
+    [[`tm:bundle:${b.code}`, `Buy pack · ${priceTag(pay)}`], ...(tests[0] ? [[`tm:card:${tests[0].code}`, 'See single test']] : [])],
   );
 }
 
@@ -106,7 +211,7 @@ async function sampleDone(ctx, quiz) {
   const buyers = await db.attempts.count({ product: 'testmandi', ref: code });
   await ctx.buttons(
     `Sample score: ${quiz.score}/${quiz.qids.length}\n\nThe full test has ${t.qids.length} questions with explanations${buyers >= 10 ? ` and your rank among ${fmtNum(buyers)} students` : ' and your rank among buyers'}.`,
-    [[`tm:buy:${code}`, `Buy · ${rupees(t.price)}`], ['tm:browse', 'Other tests']],
+    [[`tm:buy:${code}`, `Buy · ${priceTag(priceFor(ctx, t.price).pay)}`], ['tm:browse', 'Other tests']],
   );
 }
 
@@ -114,37 +219,68 @@ async function buy(ctx, code) {
   const t = await db.tests.findOne({ code });
   if (!t) return menu(ctx);
   if (owns(ctx.user, code)) return sendLink(ctx, code);
-  const order = await createOrder({ product: 'testmandi', phone: ctx.phone, item: `test:${code}`, title: t.title, amount: t.price, meta: { code, sellerPhone: t.sellerPhone } });
-  await ctx.link(`${t.title} · ${rupees(t.price)}\nPay with any UPI app. The test link arrives here right after payment.`, order.link, 'Pay by UPI');
+  return checkout(ctx, { item: `test:${code}`, code, title: t.title, price: t.price, sellerPhone: t.sellerPhone });
 }
 
 async function buyBundle(ctx, code) {
   const b = await db.tests.findOne({ code, type: 'bundle' });
   if (!b) return menu(ctx);
-  const order = await createOrder({ product: 'testmandi', phone: ctx.phone, item: `bundle:${code}`, title: b.title, amount: b.price, meta: { code, sellerPhone: b.sellerPhone } });
-  await ctx.link(`${b.title} · ${rupees(b.price)}\nPay with any UPI app. All tests unlock right after payment.`, order.link, 'Pay by UPI');
+  return checkout(ctx, { item: `bundle:${code}`, code, title: b.title, price: b.price, sellerPhone: b.sellerPhone });
+}
+
+async function checkout(ctx, { item, code, title, price, sellerPhone }) {
+  const { discount, walletUse, pay } = priceFor(ctx, price);
+  const meta = { code, sellerPhone, listPrice: price, discount, walletUse };
+  if (pay <= 0) {
+    // Free test, or fully covered by discount and wallet: unlock without a payment link
+    const order = await db.orders.insertOne({ product: 'testmandi', phone: ctx.phone, item, title, amount: 0, meta, status: 'paid', paidAt: new Date(), createdAt: new Date(), nudged: true });
+    await ctx.track('paid', { item, amount: 0, listPrice: price });
+    return onPaid(ctx, order);
+  }
+  const order = await createOrder({ product: 'testmandi', phone: ctx.phone, item, title, amount: pay, meta });
+  const notes = [discount && `🎁 ${rupees(discount)} invite discount`, walletUse && `💰 ${rupees(walletUse)} from wallet`].filter(Boolean).join(' · ');
+  await ctx.link(`${title} · ${rupees(pay)}${notes ? `\n${notes}` : ''}\nPay with any UPI app. ${item.startsWith('bundle:') ? 'All tests unlock' : 'The test link arrives here'} right after payment.`, order.link, 'Pay by UPI');
 }
 
 export async function onPaid(ctx, order) {
-  const { code, sellerPhone } = order.meta;
+  const { code, sellerPhone, listPrice = order.amount, discount = 0, walletUse = 0 } = order.meta;
   const isBundle = order.item.startsWith('bundle:');
   const item = await db.tests.findOne({ code });
   const codes = isBundle ? item.testCodes : [code];
-  await ctx.setUser({ purchases: [...new Set([...(ctx.user.purchases || []), ...codes])] });
-  await db.tests.updateOne({ code }, { $inc: { salesCount: 1, revenue: order.amount } });
-  await ctx.say(`✅ Payment received: ${rupees(order.amount)}`);
+  const firstPurchase = !(ctx.user.purchases || []).length;
+  const patch = { purchases: [...new Set([...(ctx.user.purchases || []), ...codes])] };
+  if (discount) patch.refDiscountUsed = true;
+  const inc = walletUse ? { wallet: -Math.min(walletUse, ctx.user.wallet || 0) } : {};
+  await ctx.setUser(patch, Object.keys(inc).length ? { $inc: inc } : {});
+  await db.tests.updateOne({ code }, { $inc: { salesCount: 1, revenue: listPrice } });
+  if (listPrice > 0) await ctx.say(order.amount > 0 ? `✅ Payment received: ${rupees(order.amount)}` : '✅ Unlocked with your discount and wallet credit.');
   if (isBundle) {
     const tests = await db.tests.find({ code: { $in: codes } });
     await ctx.list(`${item.title} unlocked. Pick a test to start:`, 'Start a test', [{ title: 'Your tests', rows: tests.map((t) => ({ id: `tm:start:${t.code}`, title: t.title, description: `${t.qids.length} Qs · ${t.durationMin} min` })) }]);
   } else {
     await sendLink(ctx, code);
   }
-  await notifySeller(sellerPhone, item, order);
+  if (listPrice > 0) {
+    await rewardBuyerReferrer(ctx, firstPurchase);
+    await notifySeller(sellerPhone, item, listPrice);
+  }
 }
 
-async function notifySeller(sellerPhone, item, order) {
+// ---- Referral rewards ----------------------------------------------------
+async function rewardBuyerReferrer(ctx, firstPurchase) {
+  const u = ctx.user;
+  if (!firstPurchase || !u.referredBy || u.refRewarded) return;
+  const reward = ctx.cfg.referral.buyerReward;
+  await ctx.setUser({ refRewarded: true });
+  const ref = await db.users.updateOne({ product: 'testmandi', phone: u.referredBy }, { $inc: { wallet: reward, referrals: 1 } });
+  if (ref && within24h(ref)) {
+    await send('testmandi', ref.phone, { type: 'text', text: `🎉 Your friend just bought their first test on TestMandi.\n${rupees(reward)} added to your wallet. Wallet: ${rupees(ref.wallet)}\n\nInvite more friends: send REFER` });
+  }
+}
+
+async function notifySeller(sellerPhone, item, listPrice) {
   if (!sellerPhone) return;
-  const share = Math.round(order.amount * (item.sellerShare ?? 0.7) * 100) / 100;
+  const share = round2(listPrice * (item.sellerShare ?? 0.7));
   const today = istDate();
   const seller = await db.users.updateOne(
     { product: 'testmandi', phone: sellerPhone },
@@ -152,15 +288,62 @@ async function notifySeller(sellerPhone, item, order) {
     { upsert: true },
   );
   const day = seller.seller?.day === today ? seller.seller : { day: today, todaySales: 0, todayEarnings: 0 };
-  day.todaySales += 1; day.todayEarnings = Math.round((day.todayEarnings + share) * 100) / 100;
+  day.todaySales += 1; day.todayEarnings = round2(day.todayEarnings + share);
   await db.users.updateOne({ product: 'testmandi', phone: sellerPhone }, { $set: { 'seller.day': today, 'seller.todaySales': day.todaySales, 'seller.todayEarnings': day.todayEarnings } });
-  const text = `🔔 New sale · ${item.title}\nPrice ${rupees(order.amount)} · Your share ${rupees(share)}\nToday: ${day.todaySales} sale${day.todaySales > 1 ? 's' : ''} · ${rupees(day.todayEarnings)}\n\nShare this test to sell more:\n${shareLink(item.code) || 'TEST ' + item.code}`;
+  const text = `🔔 New sale · ${item.title}\nPrice ${rupees(listPrice)} · Your share ${rupees(share)}\nToday: ${day.todaySales} sale${day.todaySales > 1 ? 's' : ''} · ${rupees(day.todayEarnings)}\n\nShare this test to sell more:\n${shareLink(item.code) || 'TEST ' + item.code}`;
   if (within24h(seller)) await send('testmandi', sellerPhone, { type: 'text', text });
   else if (process.env.TEMPLATE_SELLER_SALE) {
     await send('testmandi', sellerPhone, { type: 'template', name: process.env.TEMPLATE_SELLER_SALE, params: [item.title, rupees(share), String(day.todaySales)] });
   }
+  await sellerReferralBonus(seller, item, listPrice);
 }
 
+// The teacher who invited this seller earns a % of their sales for a limited time
+async function sellerReferralBonus(seller, item, listPrice) {
+  const r = (await import('../products.js')).products.testmandi.referral;
+  if (!seller.sellerReferredBy || !seller.sellerReferredAt) return;
+  if (Date.now() - new Date(seller.sellerReferredAt).getTime() > r.sellerBonusDays * DAY) return;
+  const bonus = round2(listPrice * r.sellerBonusPct);
+  if (bonus <= 0) return;
+  const inviter = await db.users.updateOne(
+    { product: 'testmandi', phone: seller.sellerReferredBy },
+    { $inc: { 'seller.earnings': bonus, 'seller.referralEarnings': bonus } },
+  );
+  if (inviter && within24h(inviter)) {
+    await send('testmandi', inviter.phone, { type: 'text', text: `💸 Referral bonus: ${rupees(bonus)}\nA teacher you invited just sold "${item.title}". You earn ${Math.round(r.sellerBonusPct * 100)}% of their sales.` });
+  }
+}
+
+async function joinAsBuyer(ctx, code) {
+  const u = ctx.user;
+  const referrer = await db.users.findOne({ product: 'testmandi', refCode: code });
+  const eligible = referrer && referrer.phone !== ctx.phone && !u.referredBy && !(u.purchases || []).length;
+  if (eligible) {
+    await ctx.setUser({ referredBy: referrer.phone });
+    await ctx.say(`🎁 Welcome to TestMandi! Your friend's invite gives you ${rupees(ctx.cfg.referral.friendDiscount)} off your first test.`);
+  }
+  return browse(ctx);
+}
+
+async function joinAsSeller(ctx, code) {
+  const u = ctx.user;
+  const inviter = await db.users.findOne({ product: 'testmandi', refCode: code });
+  const alreadySelling = await db.tests.count({ sellerPhone: ctx.phone });
+  if (inviter && inviter.phone !== ctx.phone && !u.sellerReferredBy && !alreadySelling) {
+    await ctx.setUser({ sellerReferredBy: inviter.phone, sellerReferredAt: new Date() });
+  }
+  return sellInfo(ctx);
+}
+
+async function referBuyer(ctx) {
+  const r = ctx.cfg.referral;
+  const u = ctx.user;
+  const link = waLink(config.wa.displayNumbers.testmandi, `Hi TREF ${u.refCode}`);
+  await ctx.say(`🎁 Refer & earn\n• Your friend gets ${rupees(r.friendDiscount)} off their first test\n• You get ${rupees(r.buyerReward)} in your wallet when they buy\n• Wallet credit is used automatically on your next test\n\nFriends invited who bought: ${u.referrals || 0}\nWallet: ${rupees(u.wallet || 0)}\n\nForward the message below 👇`);
+  await ctx.say(`I practise mock tests on WhatsApp with TestMandi: SSC, NEET, TNPSC and more, with rank and explanations. Use my link and get ${rupees(r.friendDiscount)} off your first test: ${link || 'message TestMandi and send TREF ' + u.refCode}`);
+}
+
+// ---- Tests, rating, recommendations --------------------------------------
 async function sendLink(ctx, code) {
   const t = await db.tests.findOne({ code });
   if (!t || !owns(ctx.user, code)) return showTest(ctx, code);
@@ -201,16 +384,10 @@ async function recommend(ctx, code) {
     await ctx.buttons(`Keep practising with ${t.sellerName}: ${left} more tests in "${bundle.title}".`, [[`tm:card:${bundle.code}`, '🎁 See the pack'], ['tm:browse', 'Browse more']]);
     return;
   }
-  const more = (await db.tests.find({ sellerPhone: t.sellerPhone, type: { $ne: 'bundle' } }, { sort: { attemptsCount: -1 }, limit: 10 }))
+  const more = (await db.tests.find({ ...LISTED, sellerPhone: t.sellerPhone }, { sort: { attemptsCount: -1 }, limit: 10 }))
     .filter((x) => !owned.includes(x.code)).slice(0, 5);
   if (!more.length) return browse(ctx);
-  await ctx.list(`More tests by ${t.sellerName}:`, 'See tests', [{ title: t.sellerName, rows: more.map((x) => ({ id: `tm:card:${x.code}`, title: x.title, description: `${rupees(x.price)} · ${x.qids.length} Qs · ${rating(x)}` })) }]);
-}
-
-async function browse(ctx) {
-  const tests = await db.tests.find({ type: { $ne: 'bundle' }, listed: { $ne: false } }, { sort: { attemptsCount: -1 }, limit: 10 });
-  if (!tests.length) return ctx.say('No tests are listed yet. Check back soon!');
-  await ctx.list('Popular tests on TestMandi:', 'See tests', [{ title: 'Popular', rows: tests.map((t) => ({ id: `tm:card:${t.code}`, title: t.title, description: `${rupees(t.price)} · ${t.sellerName} · ${rating(t)}` })) }]);
+  await ctx.list(`More tests by ${t.sellerName}:`, 'See tests', [{ title: 'More tests', rows: more.map((x) => ({ id: `tm:card:${x.code}`, title: x.title, description: `${priceTag(x.price)} · ${x.qids.length} Qs · ${rating(x)}` })) }]);
 }
 
 async function myTests(ctx) {
@@ -220,22 +397,28 @@ async function myTests(ctx) {
   await ctx.list('Your tests:', 'Open', [{ title: 'Purchased', rows: tests.slice(0, 10).map((t) => ({ id: `tm:start:${t.code}`, title: t.title, description: `${t.qids.length} Qs · tap to get a fresh link` })) }]);
 }
 
+// ---- Sellers ----------------------------------------------------------------
 async function sellInfo(ctx) {
-  await ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale\n• Each test gets a WhatsApp link students can buy from in one tap\n• Instant sale alerts and weekly UPI payouts\n\nSign up as a seller at ${ctx.cfg.webBase}`);
+  const invited = ctx.user.sellerReferredBy ? '\n\n🤝 Your invite is saved. Start selling and your inviter gets a small bonus from TestMandi; your share stays the same.' : '';
+  await ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale\n• Each test gets a WhatsApp link students can buy from in one tap\n• Instant sale alerts and weekly UPI payouts\n\nSign up as a seller at ${ctx.cfg.webBase}, using this WhatsApp number.${invited}`);
 }
 
 async function sellerStats(ctx) {
   const tests = await db.tests.find({ sellerPhone: ctx.phone }, { sort: { salesCount: -1 } });
   if (!tests.length) return sellInfo(ctx);
+  const r = ctx.cfg.referral;
   const s = ctx.user.seller || {};
   const today = s.day === istDate() ? s : { todaySales: 0, todayEarnings: 0 };
+  const invited = await db.users.count({ product: 'testmandi', sellerReferredBy: ctx.phone });
   const lines = [
     '💰 Your TestMandi sales',
     `Today: ${today.todaySales} sales · ${rupees(today.todayEarnings || 0)}`,
     `All time: ${s.sales || 0} sales · ${rupees(s.earnings || 0)}`,
-    '',
-    'Share links (post these in your groups):',
-    ...tests.slice(0, 8).map((t) => `• ${t.title} (${t.salesCount || 0} sold)\n  ${shareLink(t.code) || 'TEST ' + t.code}`),
   ];
+  if (s.referralEarnings) lines.push(`Of which referral bonus: ${rupees(s.referralEarnings)}`);
+  lines.push('', 'Share links (post these in your groups):', ...tests.slice(0, 8).map((t) => `• ${t.title} (${t.salesCount || 0} sold)\n  ${shareLink(t.code) || 'TEST ' + t.code}`));
   await ctx.say(lines.join('\n'));
+  const link = waLink(config.wa.displayNumbers.testmandi, `Hi SREF ${ctx.user.refCode}`);
+  await ctx.say(`🤝 Invite other teachers to sell on TestMandi\nYou earn ${Math.round(r.sellerBonusPct * 100)}% of their sales for ${Math.round(r.sellerBonusDays / 30)} months. It comes from TestMandi's share, so they still keep ${Math.round(ctx.cfg.sellerShare * 100)}%.\nTeachers invited: ${invited}\n\nForward this to teachers 👇`);
+  await ctx.say(`I sell my mock tests on TestMandi and students buy them right on WhatsApp. Teachers keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale. Join with my link: ${link || 'message TestMandi and send SREF ' + ctx.user.refCode}`);
 }

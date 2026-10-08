@@ -88,8 +88,10 @@ export async function seed({ force = false, withTests = true } = {}) {
   const seller = { sellerPhone: '919999900001', sellerName: 'Raise Academy', sellerShare: 0.7 };
   const base = { attemptsCount: 0, salesCount: 0, ratingSum: 0, ratingCount: 0, revenue: 0, createdAt: new Date(), listed: true, language: 'English', type: 'test' };
   await db.tests.insertMany([
-    { ...base, ...seller, code: 'SSC-GK-101', title: 'SSC CGL GK Mock 1', price: 29, durationMin: 10, qids: ids.slice(0, 8) },
-    { ...base, ...seller, code: 'SSC-GK-102', title: 'SSC CGL GK Mock 2', price: 29, durationMin: 10, qids: ids.slice(4, 12) },
+    { ...base, ...seller, code: 'SSC-GK-101', title: 'SSC CGL GK Mock 1', category: 'SSC', price: 29, durationMin: 10, qids: ids.slice(0, 8) },
+    { ...base, ...seller, code: 'SSC-GK-102', title: 'SSC CGL GK Mock 2', category: 'SSC', price: 29, durationMin: 10, qids: ids.slice(4, 12) },
+    { ...base, ...seller, code: 'GK-FREE-1', title: 'Daily GK Practice (Free)', category: 'General Knowledge', price: 0, durationMin: 5, qids: ids.slice(0, 5) },
+    { ...base, ...seller, code: 'TNPSC-GK-1', title: 'TNPSC Group 4 GK Mock', category: 'TNPSC', price: 19, durationMin: 10, qids: ids.slice(2, 10) },
     { ...base, ...seller, code: 'SSC-GK-PACK', title: 'SSC GK Mock Pack', type: 'bundle', price: 49, testCodes: ['SSC-GK-101', 'SSC-GK-102'] },
   ]);
   return true;

@@ -26,6 +26,13 @@ export const products = {
     webBase: 'https://testmandi.in',
     sellerShare: 0.7, // seller's share of each sale
     freeSample: 5, // free sample questions before buying
+    pageSize: 8, // tests per page when browsing
+    referral: {
+      friendDiscount: 10, // ₹ off the invited buyer's first purchase
+      buyerReward: 10, // ₹ wallet credit to the inviter when that friend's first purchase is paid
+      sellerBonusPct: 0.05, // inviting seller earns 5% of an invited seller's sales (paid from the platform's share)
+      sellerBonusDays: 180, // ...for this many days after the invited seller joins
+    },
   },
 
   classcoach: {
@@ -37,6 +44,10 @@ export const products = {
     graceStudents: 5, // students allowed over the limit so no student is turned away mid-quiz
     trialDays: 14, // full Pro features for new tutors, then back to Free unless they upgrade
     quizSize: 10,
+    referral: {
+      friendDiscount: 50, // ₹ off the invited tutor's first paid plan
+      rewardDays: 30, // free Pro days for the inviter when that tutor pays
+    },
     plans: {
       pro50: { id: 'pro50', title: 'Pro 50 students', price: 299, period: 'month', students: 50 },
       pro100: { id: 'pro100', title: 'Pro 100 students', price: 499, period: 'month', students: 100, best: true },

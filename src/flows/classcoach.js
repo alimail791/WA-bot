@@ -1,6 +1,8 @@
 // ClassCoach: tutor-first flow. Tutors run their class from WhatsApp; students join with "JOIN CODE".
 // Funnel: Hi → 14-day Pro trial → quiz from a topic in seconds → one link for the class group
 //         → auto-graded results in chat → upgrade when the class outgrows the free tier or trial ends.
+// Refer & earn: tutors invite tutors ("CREF CODE"): the friend gets ₹ off their first plan,
+//               the inviter gets free Pro days when the friend pays.
 import { db } from '../store.js';
 import { config } from '../config.js';
 import { pickQuestions, getQuestions } from '../questions.js';
@@ -8,7 +10,7 @@ import { createMagicLink } from '../magic.js';
 import { createOrder } from '../payments.js';
 import { send } from '../providers/index.js';
 import { rupees } from '../products.js';
-import { code as newCode, waLink, DAY, istDate, maskPhone } from '../util.js';
+import { code as newCode, waLink, DAY, istDate, maskPhone, refCodeFor } from '../util.js';
 import { within24h } from '../engine.js';
 import { offerFooter } from './common.js';
 
@@ -34,6 +36,9 @@ export async function handle(ctx, input) {
   if (!ctx.user.role) {
     await ctx.setUser({ role: 'tutor', trialEndsAt: new Date(Date.now() + ctx.cfg.trialDays * DAY) });
   }
+  if (!ctx.user.refCode) await ctx.setUser({ refCode: refCodeFor('classcoach', ctx.phone) });
+  const cref = upper.match(/\bCREF\s+([A-Z0-9]{6})\b/);
+  if (cref) await joinWithInvite(ctx, cref[1]);
   if (state === 'await_topic' && !replyId) return makeQuiz(ctx, ctx.session.data.subject, text);
   if (state === 'await_classname' && !replyId) return renameClass(ctx, text);
 
@@ -49,9 +54,11 @@ export async function handle(ctx, input) {
     if (cmd === 'plans') return plans(ctx);
     if (cmd === 'buy') return buy(ctx, a);
     if (cmd === 'class') return classInfo(ctx);
+    if (cmd === 'refer') return refer(ctx);
     if (cmd === 'rename') { await ctx.go('await_classname'); return ctx.say('Send the new class name, like "Class 10 Science · Evening batch".'); }
   }
-  const cmdText = { QUIZ: 'new', RESULTS: 'results', PLANS: 'plans', CLASS: 'class' }[upper];
+  const cmdText = { QUIZ: 'new', RESULTS: 'results', PLANS: 'plans', CLASS: 'class', REFER: 'refer' }[upper];
+  if (cmdText === 'refer') return refer(ctx);
   if (cmdText === 'new') return chooseSubject(ctx);
   if (cmdText === 'results') return results(ctx);
   if (cmdText === 'plans') return plans(ctx);
@@ -282,16 +289,25 @@ async function plans(ctx) {
   const head = [`ClassCoach plans`, `Free: up to ${ctx.cfg.freeStudents} students, unlimited quizzes.`];
   if (onTrial(ctx.user)) head.push(`Your Pro trial ends in ${trialDaysLeft(ctx.user)} days. Upgrade now to keep reminders and up to 100 students.`);
   if (size) head.push(`Your class: ${size} students.`);
+  if (friendDiscount(ctx)) head.push(`🎁 Your invite gives you ${rupees(friendDiscount(ctx))} off your first plan.`);
   await ctx.list(head.join('\n'), 'See plans', [{ title: 'Plans', rows }]);
   const f = offerFooter();
   if (f) await ctx.say(`⏳ ${f}`);
 }
 
+// Invited tutors get a discount on their first paid plan
+function friendDiscount(ctx) {
+  const u = ctx.user;
+  return u.referredBy && !u.firstPlanBought ? ctx.cfg.referral.friendDiscount : 0;
+}
+
 async function buy(ctx, planId) {
   const plan = ctx.cfg.plans[planId];
   if (!plan) return plans(ctx);
-  const order = await createOrder({ product: 'classcoach', phone: ctx.phone, item: planId, title: `ClassCoach ${plan.title}`, amount: plan.price, meta: {} });
-  await ctx.link(`${plan.title} · ${rupees(plan.price)}/${plan.period}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
+  const discount = Math.min(friendDiscount(ctx), plan.price - 1);
+  const amount = plan.price - discount;
+  const order = await createOrder({ product: 'classcoach', phone: ctx.phone, item: planId, title: `ClassCoach ${plan.title}`, amount, meta: { listPrice: plan.price, discount } });
+  await ctx.link(`${plan.title} · ${rupees(amount)}/${plan.period}${discount ? `\n🎁 ${rupees(discount)} invite discount (was ${rupees(plan.price)})` : ''}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
 }
 
 export async function onPaid(ctx, order) {
@@ -305,14 +321,51 @@ export async function onPaid(ctx, order) {
     await ctx.setUser({ plan: { id: plan.id, students: plan.students, until: new Date(from.getTime() + days * DAY) } });
   }
   await ctx.say(`✅ Payment received: ${rupees(order.amount)}\n${plan.title} is active for ${plan.period === 'year' ? '12 months' : '30 days'}. Thank you! 🙏`);
-  await ctx.buttons('What next?', [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results']]);
+  const firstPlan = !ctx.user.firstPlanBought;
+  if (firstPlan) await ctx.setUser({ firstPlanBought: true });
+  if (firstPlan && ctx.user.referredBy && !ctx.user.refRewarded) await rewardInviter(ctx);
+  await ctx.buttons('What next?', [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:refer', '🎁 Refer & earn']]);
+}
+
+// ---- Refer & earn ----------------------------------------------------------
+async function joinWithInvite(ctx, code) {
+  const u = ctx.user;
+  const inviter = await db.users.findOne({ product: 'classcoach', refCode: code, role: 'tutor' });
+  if (!inviter || inviter.phone === ctx.phone || u.referredBy || u.firstPlanBought) return;
+  await ctx.setUser({ referredBy: inviter.phone });
+  await ctx.say(`🎁 You were invited by a fellow teacher. You get ${rupees(ctx.cfg.referral.friendDiscount)} off your first ClassCoach plan, on top of your free ${ctx.cfg.trialDays}-day Pro trial.`);
+}
+
+async function rewardInviter(ctx) {
+  const days = ctx.cfg.referral.rewardDays;
+  await ctx.setUser({ refRewarded: true });
+  const inv = await db.users.findOne({ product: 'classcoach', phone: ctx.user.referredBy });
+  if (!inv) return;
+  const from = active(inv.plan?.until) ? new Date(inv.plan.until) : new Date();
+  const plan = inv.plan && active(inv.plan.until) ? { ...inv.plan } : { id: 'pro50', students: ctx.cfg.plans.pro50.students };
+  plan.until = new Date(from.getTime() + days * DAY);
+  const updated = await db.users.updateOne({ _id: inv._id }, { $set: { plan }, $inc: { referrals: 1 } });
+  if (within24h(updated)) {
+    await send('classcoach', inv.phone, { type: 'text', text: `🎉 A teacher you invited just upgraded ClassCoach.
+You got ${days} days of Pro free. Pro now runs till ${plan.until.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}.
+
+Invite more teachers: send REFER` });
+  }
+}
+
+async function refer(ctx) {
+  const r = ctx.cfg.referral;
+  const u = ctx.user;
+  const link = waLink(config.wa.displayNumbers.classcoach, `Hi CREF ${u.refCode}`);
+  await ctx.say(`🎁 Refer & earn\n• Teachers you invite get ${rupees(r.friendDiscount)} off their first plan, plus the free ${ctx.cfg.trialDays}-day trial\n• You get ${r.rewardDays} days of Pro free for every teacher who upgrades\n• No limit: 12 teachers = a full year free\n\nTeachers who upgraded: ${u.referrals || 0}\n\nForward the message below to teacher friends and groups 👇`);
+  await ctx.say(`I make class quizzes on WhatsApp in seconds with ClassCoach. Students answer from a link, marks come back to me automatically, no app needed. Try it free with my link and get ${rupees(r.friendDiscount)} off when you upgrade: ${link || 'message ClassCoach and send CREF ' + u.refCode}`);
 }
 
 async function classInfo(ctx) {
   const c = await getClass(ctx);
   const limit = studentLimit(ctx.user, ctx.cfg);
   await ctx.say(`👥 ${c.title}\nStudents: ${c.students.length} of ${limit}${onTrial(ctx.user) ? ' (Pro trial)' : ''}\nClass code: ${c.code}\n\nStudents join by tapping:\n${joinLink(c.code) || `Message ClassCoach and send: JOIN ${c.code}`}`);
-  await ctx.buttons('Options', [['cc:rename', '✏️ Rename class'], ['cc:plans', '⭐ Plans'], ['cc:new', '✨ Make a quiz']]);
+  await ctx.buttons('Options', [['cc:rename', '✏️ Rename class'], ['cc:plans', '⭐ Plans'], ['cc:refer', '🎁 Refer & earn']]);
 }
 
 async function renameClass(ctx, text) {

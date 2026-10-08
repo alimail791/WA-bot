@@ -178,6 +178,7 @@ export function createApp() {
       code, title: b.title, type: b.type || 'test', price: Number(b.price), anchor: b.anchor ? Number(b.anchor) : undefined,
       sellerPhone: b.sellerPhone || '', sellerName: b.sellerName || 'TestMandi', sellerShare: b.sellerShare ?? products.testmandi.sellerShare,
       durationMin: Number(b.durationMin || 30), language: b.language || '', listed: b.listed !== false,
+      ...(b.category ? { category: String(b.category).trim() } : {}),
       ...(b.type === 'bundle' ? { testCodes: (b.testCodes || []).map((c) => String(c).toUpperCase()) } : { qids }),
     };
     const saved = await db.tests.updateOne({ code }, { $set: doc, $setOnInsert: { attemptsCount: 0, salesCount: 0, ratingSum: 0, ratingCount: 0, revenue: 0, createdAt: new Date() } }, { upsert: true });
@@ -210,7 +211,8 @@ export function createApp() {
 async function productOnSharedNumber(ev) {
   const upper = ev.replyId ? '' : String(ev.text || '').toUpperCase();
   if (/^(TEST|BUY)\s/.test(upper)) return 'testmandi';
-  if (/^JOIN\s/.test(upper)) return 'classcoach';
+  if (/\b[TS]REF\s/.test(upper)) return 'testmandi';
+  if (/^JOIN\s/.test(upper) || /\bCREF\s/.test(upper)) return 'classcoach';
   if (/\bREF\s/.test(upper)) return 'yneet';
   const pick = { 'pick:yneet': 'yneet', 'pick:testmandi': 'testmandi', 'pick:classcoach': 'classcoach' }[ev.replyId];
   if (pick) { await db.sessions.updateOne({ product: '_shared', phone: ev.from }, { $set: { pick } }, { upsert: true }); return pick; }

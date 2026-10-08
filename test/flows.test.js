@@ -297,3 +297,109 @@ test('Live mode without Razorpay never gives out the free test-payment page', as
     await assert.rejects(createOrder({ product: 'yneet', phone: '919000000112', item: 'pack10', title: 'x', amount: 199 }), (e) => e.code === 'NO_PAYMENTS');
   } finally { config.provider = prev; }
 });
+
+test('TestMandi catalogue: categories, paging, search and free tests', async () => {
+  const P = 'testmandi', ph = '919000000200';
+  let m = await say(P, ph, 'Hi');
+  m = await tap(P, ph, m, 'tm:browse');
+  const cats = choice(m, 'Most popular') && m.at(-1).sections[0].rows.map((r) => r.title);
+  assert.ok(cats.includes('SSC') && cats.includes('TNPSC') && cats.includes('General Knowledge'));
+  m = await tap(P, ph, m, 'tm:cat:SSC');
+  const titles = m.at(-1).sections[0].rows.map((r) => r.title);
+  assert.ok(titles.includes('SSC CGL GK Mock 1') && !titles.includes('TNPSC Group 4 GK Mock'));
+  // search
+  m = await say(P, ph, 'SEARCH tnpsc');
+  assert.match(textOf(m), /1 test for "tnpsc"/);
+  m = await say(P, ph, '', 'tm:search');
+  m = await say(P, ph, 'nothing-matches-this');
+  assert.match(textOf(m), /No tests found/);
+  // free test unlocks without payment
+  m = await say(P, ph, 'TEST GK-FREE-1');
+  assert.match(textOf(m), /FREE/);
+  m = await tap(P, ph, m, 'tm:buy:GK-FREE-1');
+  assert.ok(lastLink(m).url.includes('/t/'), 'free test goes straight to the test link');
+  assert.equal(await db.orders.count({ phone: ph, status: 'created' }), 0);
+
+  // paging: add 9 more SSC tests so SSC has 11
+  const qids = (await db.tests.findOne({ code: 'SSC-GK-101' })).qids;
+  for (let i = 0; i < 9; i++) await db.tests.insertOne({ code: `SSC-X-${i}`, title: `SSC Extra ${i}`, category: 'SSC', type: 'test', price: 9, durationMin: 5, qids, sellerName: 'Raise Academy', sellerPhone: '919999900001', attemptsCount: 0, ratingSum: 0, ratingCount: 0 });
+  m = await say(P, ph, '', 'tm:cat:SSC:0');
+  assert.ok(choice(m, 'More tests'));
+  m = await tap(P, ph, m, 'tm:cat:SSC:1');
+  assert.match(textOf(m), /page 2/);
+  await db.tests.deleteMany({ category: 'SSC', title: { $ne: 'x' }, code: { $in: Array.from({ length: 9 }, (_, i) => `SSC-X-${i}`) } });
+});
+
+test('TestMandi buyer referral: friend discount, inviter wallet credit, wallet used next time', async () => {
+  const P = 'testmandi', a = '919000000210', b = '919000000211';
+  await say(P, a, 'Hi');
+  let m = await say(P, a, 'REFER');
+  const code = textOf(m).match(/TREF(?: |%20)([A-Z0-9]{6})/)[1];
+  let mb = await say(P, b, `Hi TREF ${code}`);
+  assert.match(textOf(mb), /₹10 off your first test/);
+  mb = await say(P, b, 'TEST SSC-GK-101');
+  assert.match(textOf(mb), /You pay: ₹19/);
+  mb = await tap(P, b, mb, 'tm:buy:SSC-GK-101');
+  assert.match(textOf(mb), /SSC CGL GK Mock 1 · ₹19/);
+  await payLink(lastLink(mb).url);
+  const ua = await db.users.findOne({ product: P, phone: a });
+  assert.equal(ua.wallet, 10);
+  // A now buys with wallet credit
+  m = await say(P, a, 'TEST TNPSC-GK-1');
+  assert.match(textOf(m), /Wallet: −₹10/);
+  m = await tap(P, a, m, 'tm:buy:TNPSC-GK-1');
+  assert.match(textOf(m), /₹9/);
+  await payLink(lastLink(m).url);
+  assert.equal((await db.users.findOne({ product: P, phone: a })).wallet, 0);
+  // Second purchase by B gives no extra reward
+  mb = await say(P, b, '', 'tm:buy:TNPSC-GK-1');
+  await payLink(lastLink(mb).url);
+  assert.equal((await db.users.findOne({ product: P, phone: a })).wallet, 0);
+});
+
+test('TestMandi wallet that covers the full price unlocks without payment', async () => {
+  const P = 'testmandi', ph = '919000000220';
+  await say(P, ph, 'Hi');
+  await db.users.updateOne({ product: P, phone: ph }, { $set: { wallet: 100 } });
+  const m = await say(P, ph, '', 'tm:buy:SSC-GK-102');
+  assert.match(textOf(m), /Unlocked with your discount and wallet credit/);
+  assert.ok(lastLink(m).url.includes('/t/'));
+  assert.equal((await db.users.findOne({ product: P, phone: ph })).wallet, 71);
+});
+
+test('TestMandi seller referral: inviter earns 5% of the new seller\'s sales', async () => {
+  const P = 'testmandi', inviter = '919999900001', teacher = '919000000230', buyer = '919000000231';
+  let m = await say(P, inviter, 'SELLER');
+  const code = textOf(m).match(/SREF(?: |%20)([A-Z0-9]{6})/)[1];
+  m = await say(P, teacher, `Hi SREF ${code}`);
+  assert.match(textOf(m), /Your invite is saved/);
+  const res = await fetch(`${base}/admin/tests`, { method: 'POST', headers: { 'x-api-key': config.adminKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'NEW-T-1', title: 'New Teacher Mock', category: 'SSC', price: 100, product: 'testmandi', tag: 'sample', count: 5, sellerPhone: teacher, sellerName: 'New Teacher' }) });
+  assert.equal(res.status, 200);
+  const before = (await db.users.findOne({ product: P, phone: inviter })).seller?.earnings || 0;
+  fresh(P, inviter);
+  const mb = await say(P, buyer, '', 'tm:buy:NEW-T-1');
+  await payLink(lastLink(mb).url);
+  const after = await db.users.findOne({ product: P, phone: inviter });
+  assert.equal(Math.round((after.seller.earnings - before) * 100) / 100, 5);
+  assert.match(textOf(fresh(P, inviter)), /Referral bonus: ₹5/);
+  assert.equal((await db.users.findOne({ product: P, phone: teacher })).seller.earnings, 70);
+});
+
+test('ClassCoach referral: friend gets ₹50 off, inviter gets 30 days Pro', async () => {
+  const P = 'classcoach', a = '919000000240', b = '919000000241';
+  await say(P, a, 'Hi', '', 'Ravi');
+  let m = await say(P, a, 'REFER');
+  const code = textOf(m).match(/CREF(?: |%20)([A-Z0-9]{6})/)[1];
+  let mb = await say(P, b, `Hi CREF ${code}`, '', 'Meena');
+  assert.match(textOf(mb), /₹50 off your first ClassCoach plan/);
+  mb = await say(P, b, 'PLANS');
+  assert.match(textOf(mb), /invite gives you ₹50 off/);
+  mb = await tap(P, b, mb, 'cc:buy:pro50');
+  assert.match(textOf(mb), /₹249\/month/);
+  await payLink(lastLink(mb).url);
+  const ua = await db.users.findOne({ product: P, phone: a });
+  assert.equal(ua.plan.id, 'pro50');
+  assert.ok(new Date(ua.plan.until) - Date.now() > 29 * 86400e3);
+  assert.match(textOf(fresh(P, a)), /30 days of Pro free/);
+});

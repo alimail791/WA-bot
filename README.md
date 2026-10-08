@@ -24,6 +24,19 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 - **Upgrade at the right moment.** ClassCoach asks tutors to upgrade when their class passes 20 students (students are never turned away mid-quiz; 5 extra are allowed) or when the trial is ending.
 - **Sellers become marketers.** TestMandi sellers get a WhatsApp share link per test and an instant alert with their share for every sale.
 
+### Refer & earn
+| Product | Link people share | Friend gets | Inviter gets |
+|---|---|---|---|
+| YNeet | `Hi REF CODE` | 1 free analysis after first quiz | 1 free analysis |
+| TestMandi buyer | `Hi TREF CODE` | ₹10 off first test | ₹10 wallet credit when the friend buys (used automatically) |
+| TestMandi seller | `Hi SREF CODE` | Keeps the normal 70% | 5% of the invited seller's sales for 6 months, paid from TestMandi's share |
+| ClassCoach | `Hi CREF CODE` | ₹50 off first plan (plus the trial) | 30 days of Pro free per teacher who upgrades |
+
+People get their link by sending `REFER` (TestMandi sellers: `SELLER`).
+
+### TestMandi catalogue
+`BROWSE` (or the Browse button) shows categories with test counts, then 8 tests per page with "More tests". `SEARCH ssc gk` searches titles, categories and teacher names. Tests priced ₹0 open straight away with no payment. Give each test a `category` when creating it (SSC, NEET, TNPSC, Banking…).
+
 Prices and limits are in `src/products.js`. Change them there.
 
 ## Try it locally (no WhatsApp needed)
@@ -85,7 +98,7 @@ curl -X POST "https://<domain>/admin/questions/import?product=yneet" \
 
 ```bash
 curl -X POST https://<domain>/admin/tests -H "x-api-key: $ADMIN_KEY" -H "Content-Type: application/json" -d '{
-  "code":"SSC-GK-101","title":"SSC CGL GK Mock 1","price":29,"durationMin":30,
+  "code":"SSC-GK-101","title":"SSC CGL GK Mock 1","category":"SSC","price":29,"durationMin":30,
   "tag":"SSC-GK-1","count":50,"sellerPhone":"91XXXXXXXXXX","sellerName":"Raise Academy"}'
 # a bundle
 curl -X POST https://<domain>/admin/tests -H "x-api-key: $ADMIN_KEY" -H "Content-Type: application/json" -d '{
@@ -117,8 +130,8 @@ Shows, per product for the last 7 days: users, new users, payment links created,
 ## Commands people can type
 - Everyone: `MENU`, `STOP`, `START`
 - YNeet: `QUIZ`, `MOCK`, `PLANS`, `REPORT`, `REFER`, `PARENT`, `UNLOCK`, `Hi REF CODE`
-- TestMandi: `TEST CODE`, `SELLER`
-- ClassCoach tutor: `QUIZ`, `RESULTS`, `CLASS`, `PLANS` · student: `JOIN CODE`
+- TestMandi: `TEST CODE`, `BROWSE`, `SEARCH words`, `REFER`, `SELLER`
+- ClassCoach tutor: `QUIZ`, `RESULTS`, `CLASS`, `PLANS`, `REFER` · student: `JOIN CODE`
 
 ## Using your own web apps instead of the built-in test page
 Magic links open a built-in test page at `/t/<token>` so everything works today. To run tests inside app.yneet.in, testmandi.in or classcoach.in instead, have the app call `POST /api/magic/verify` with `{ token }` and header `x-api-key`. It returns the phone, question ids and a signed session. When the student submits, the app calls `POST /api/results` with `{ token, answers: { <questionId>: <optionIndex> } }` and the same header, so the WhatsApp result and upsell still go out.
