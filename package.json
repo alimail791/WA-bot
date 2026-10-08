@@ -1,0 +1,22 @@
+{
+  "name": "wa-engine",
+  "version": "1.0.0",
+  "description": "WhatsApp-first test and sales bot for YNeet, TestMandi and ClassCoach",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "STORE=memory PROVIDER=sim node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "mongodb": "^7.7.0",
+    "node-cron": "^4.6.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
