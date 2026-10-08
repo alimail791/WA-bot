@@ -43,10 +43,11 @@ export async function syncFrom(source) {
   const codeById = new Map();
   let created = 0, updated = 0, questionsWritten = 0;
 
-  let failed = 0;
-  for (const t of source.tests) {
-    if (!t?.id || !Array.isArray(t.questions) || !t.questions.length) continue;
-    seenIds.add(t.id);
+  let failed = 0, done = 0;
+  const valid = source.tests.filter((t) => t?.id && Array.isArray(t.questions) && t.questions.length);
+  valid.forEach((t) => seenIds.add(t.id));
+  console.log(`[testmandi-sync] starting: ${valid.length} tests, ${(source.bundles || []).length} bundles`);
+  const one = async (t) => {
     try {
     const existing = await db.tests.findOne({ tmId: t.id });
     let code = existing?.code || codeFor(t.id);
@@ -91,7 +92,10 @@ export async function syncFrom(source) {
       failed++;
       console.error(`[testmandi-sync] skipped test ${t.id}: ${e.message}`);
     }
-  }
+    done++;
+    if (done % 100 === 0) console.log(`[testmandi-sync] ${done}/${valid.length} tests`);
+  };
+  for (let i = 0; i < valid.length; i += 10) await Promise.all(valid.slice(i, i + 10).map(one));
 
   // Tests removed from testmandi.in stop being sold here
   const stale = await db.tests.find({ source: 'testmandi', type: 'test' });
