@@ -9,8 +9,8 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 |---|---|---|---|
 | Who chats | NEET student | Test buyer (seller gets alerts) | Tutor; students join by link |
 | Entry | `Hi`, ads, `Hi REF CODE` from a friend | `TEST CODE` from a seller's share link | `Hi` (tutor), `JOIN CODE` (student) |
-| Free hook | Daily 3-question quiz + 1 free full mock | 5 free sample questions in chat | 14-day Pro trial, free up to 20 students |
-| Paid | ₹49 analysis · ₹199 10-mock pack (highlighted) · ₹999 season pass | Test price (seller keeps 70%) · bundles | ₹299 / ₹499 a month · ₹4,990 a year · ₹199 NEET/JEE pack |
+| Free hook | Daily quiz, quick chapter practice, 1 free NEET mock, 1 chapter test a day | 5 free sample questions, free tests | 1-month free trial, 10 students |
+| Paid | ₹99 for 5 days · Monthly by class (₹300–₹600, till month end), same as app.yneet.in | Test price (seller keeps 70%) · bundles | Starter ₹499 · Growth ₹999 · Pro ₹1,999 (3 months) · NEET/JEE ₹599–₹1,999 a month or yearly, same as classcoach.in |
 | Brings people back | Streaks, 7 PM reminder, referral credits, Sunday parent report | Rank among buyers, rating, seller's pack and other tests | Results as they arrive, reminders, upgrade when class grows |
 
 ### Built-in sales tactics
@@ -24,13 +24,19 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 - **Upgrade at the right moment.** ClassCoach asks tutors to upgrade when their class passes 20 students (students are never turned away mid-quiz; 5 extra are allowed) or when the trial is ending.
 - **Sellers become marketers.** TestMandi sellers get a WhatsApp share link per test and an instant alert with their share for every sale.
 
+### Question banks
+`data/neet_bank.json` holds the 3,627-question NEET bank shared with YNeet and ClassCoach (98 chapters, Class 11–12, difficulty, PYQs 2016–2026). It loads at start-up into YNeet (Physics / Chemistry / Biology) and ClassCoach (NEET Biology / Physics / Chemistry). Replace the file and redeploy to update it.
+
+### YNeet on WhatsApp
+Class selection (sets the monthly price), daily quiz with streaks, chapter practice (5 in chat, or a 15-question test), previous-year papers by year, NEET-pattern mocks (45 Physics + 45 Chemistry + 90 Biology, 180 minutes, +4/−1), mistake revision, weekly leaderboard, parent reports. With `YNEET_DATABASE_URL` set, plans are shared with app.yneet.in in both directions.
+
 ### Refer & earn
 | Product | Link people share | Friend gets | Inviter gets |
 |---|---|---|---|
-| YNeet | `Hi REF CODE` | 1 free analysis after first quiz | 1 free analysis |
+| YNeet | `Hi REF CODE` | 1 free premium test after first quiz | 1 free premium test, plus 1 free month when the friend buys Monthly |
 | TestMandi buyer | `Hi TREF CODE` | ₹10 off first test | ₹10 wallet credit when the friend buys (used automatically) |
 | TestMandi seller | `Hi SREF CODE` | Keeps the normal 70% | 5% of the invited seller's sales for 6 months, paid from TestMandi's share |
-| ClassCoach | `Hi CREF CODE` | ₹50 off first plan (plus the trial) | 30 days of Pro free per teacher who upgrades |
+| ClassCoach | `Hi CREF CODE` | 1-month free trial | 3 months free for every 2 teachers who buy a plan |
 
 People get their link by sending `REFER` (TestMandi sellers: `SELLER`).
 
@@ -131,7 +137,7 @@ Shows, per product for the last 7 days: users, new users, payment links created,
 
 ## Commands people can type
 - Everyone: `MENU`, `STOP`, `START`
-- YNeet: `QUIZ`, `MOCK`, `PLANS`, `REPORT`, `REFER`, `PARENT`, `UNLOCK`, `Hi REF CODE`
+- YNeet: `QUIZ`, `MOCK`, `CHAPTER`, `PYQ`, `MISTAKES`, `RANK`, `PLANS`, `REPORT`, `REFER`, `PARENT`, `CLASS`, `Hi REF CODE`
 - TestMandi: `TEST CODE`, `BROWSE`, `SEARCH words`, `REFER`, `SELLER`
 - ClassCoach tutor: `QUIZ`, `RESULTS`, `CLASS`, `PLANS`, `REFER` · student: `JOIN CODE`
 

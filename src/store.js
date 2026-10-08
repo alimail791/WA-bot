@@ -75,8 +75,8 @@ class MongoCollection {
   async insertOne(doc) { const d = { _id: randomUUID(), ...doc }; await this.c.insertOne(d); return d; }
   async insertMany(docs) { if (docs.length) await this.c.insertMany(docs.map((d) => ({ _id: randomUUID(), ...d }))); }
   async findOne(f = {}) { return this.c.findOne(f); }
-  async find(f = {}, { sort, limit, skip } = {}) {
-    let q = this.c.find(f);
+  async find(f = {}, { sort, limit, skip, projection } = {}) {
+    let q = this.c.find(f, projection ? { projection } : {});
     if (sort) q = q.sort(sort);
     if (skip) q = q.skip(skip);
     if (limit) q = q.limit(limit);

@@ -70,7 +70,7 @@ export async function trialEndingReminders() {
     await db.users.updateOne({ _id: u._id }, { $set: { trialReminded: true } });
     const c = await db.classes.findOne({ tutorPhone: u.phone });
     const size = c?.students.length || 0;
-    const text = `⏳ Your ClassCoach Pro trial ends in 2 days.${size > 20 ? `\nYour class has ${size} students; the free plan allows 20.` : ''}\nUpgrade to keep reminders, bigger classes and the NEET/JEE pack.`;
+    const text = `⏳ Your ClassCoach free trial ends in 2 days.${size ? `\nYour class has ${size} students.` : ''}\nAfter that, students you have stay but new ones can't join. Plans start at ₹499 for 3 months.`;
     if (within24h(u)) await send('classcoach', u.phone, { type: 'buttons', text, buttons: [{ id: 'cc:plans', title: '⭐ See plans' }] });
     else if (T('TEMPLATE_TRIAL_ENDING')) await send('classcoach', u.phone, { type: 'template', name: T('TEMPLATE_TRIAL_ENDING'), params: [String(size)] });
   }

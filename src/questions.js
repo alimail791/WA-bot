@@ -5,18 +5,20 @@ import { shuffle } from './util.js';
 const LETTERS = ['A', 'B', 'C', 'D', 'E'];
 
 // Pick n questions for a product, avoiding ones this user has already seen when possible
-export async function pickQuestions(product, n, { subject, topic, exclude = [] } = {}) {
-  const filter = { product };
+export async function pickQuestions(product, n, { subject, topic, exclude = [], where = {} } = {}) {
+  const filter = { product, ...where };
   if (subject) filter.subject = subject;
-  let pool = await db.questions.find(filter);
+  // Only ids and topics are read for the whole pool; full questions are fetched for the chosen few
+  let pool = await db.questions.find(filter, { projection: { _id: 1, topic: 1 } });
   if (topic) {
     const t = topic.toLowerCase();
-    const narrowed = pool.filter((q) => (q.topic || '').toLowerCase().includes(t) || q.question.toLowerCase().includes(t));
+    const narrowed = pool.filter((q) => (q.topic || '').toLowerCase().includes(t));
     if (narrowed.length >= Math.min(n, 3)) pool = narrowed;
   }
-  const fresh = pool.filter((q) => !exclude.includes(q._id));
-  const chosen = shuffle(fresh.length >= n ? fresh : pool).slice(0, n);
-  return chosen;
+  const ex = new Set(exclude);
+  const fresh = pool.filter((q) => !ex.has(q._id));
+  const ids = shuffle(fresh.length >= n ? fresh : pool).slice(0, n).map((q) => q._id);
+  return getQuestions(ids);
 }
 
 export async function getQuestions(ids) {
@@ -28,15 +30,15 @@ export async function getQuestions(ids) {
 // answers: { [questionId]: optionIndex }
 export function grade(questions, answers) {
   let correct = 0;
-  const bySubject = {}, wrongTopics = {};
+  const bySubject = {}, wrongTopics = {}, wrongIds = [];
   for (const q of questions) {
     const s = (bySubject[q.subject] ??= { total: 0, correct: 0 });
     s.total++;
     if (Number(answers[q._id]) === q.answer) { correct++; s.correct++; }
-    else wrongTopics[q.topic || q.subject] = (wrongTopics[q.topic || q.subject] || 0) + 1;
+    else { wrongTopics[q.topic || q.subject] = (wrongTopics[q.topic || q.subject] || 0) + 1; wrongIds.push(q._id); }
   }
   const weak = Object.entries(wrongTopics).sort((a, b) => b[1] - a[1]).map(([t]) => t);
-  return { correct, total: questions.length, bySubject, weak };
+  return { correct, total: questions.length, bySubject, weak, wrongIds };
 }
 
 // ---- CSV import ---------------------------------------------------------

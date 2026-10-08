@@ -1,8 +1,9 @@
 // ClassCoach: tutor-first flow. Tutors run their class from WhatsApp; students join with "JOIN CODE".
-// Funnel: Hi → 14-day Pro trial → quiz from a topic in seconds → one link for the class group
-//         → auto-graded results in chat → upgrade when the class outgrows the free tier or trial ends.
-// Refer & earn: tutors invite tutors ("CREF CODE"): the friend gets ₹ off their first plan,
-//               the inviter gets free Pro days when the friend pays.
+// Same plans and rules as classcoach.in: 1-month free trial (10 students), Starter/Growth/Pro for 3 months,
+// NEET/JEE track monthly or yearly. When a plan ends, existing students stay but no new ones can join.
+// Funnel: Hi → trial → quiz from a topic (or the 3,600-question NEET bank) in seconds → one link for the
+//         class group → auto-graded results in chat → upgrade when the class fills up or the trial ends.
+// Refer & earn ("CREF CODE"): every 2 invited teachers who buy a plan earn the inviter 3 months free.
 import { db } from '../store.js';
 import { config } from '../config.js';
 import { pickQuestions, getQuestions } from '../questions.js';
@@ -17,8 +18,11 @@ import { offerFooter } from './common.js';
 const active = (until) => until && new Date(until) > new Date();
 const onTrial = (u) => active(u.trialEndsAt) && !active(u.plan?.until);
 const isPro = (u) => active(u.plan?.until) || active(u.trialEndsAt);
-const hasNeetPack = (u) => active(u.addons?.neet) || active(u.trialEndsAt);
-const studentLimit = (u, cfg) => (active(u.plan?.until) ? u.plan.students : active(u.trialEndsAt) ? 100 : cfg.freeStudents);
+const hasNeetPack = (u) => active(u.trialEndsAt) || (active(u.plan?.until) && u.plan.track === 'neet_jee');
+// Active plan → its size; trial → 10; expired → frozen at the current class size
+const studentLimit = (u, cfg, current = 0) => (active(u.plan?.until) ? u.plan.students : active(u.trialEndsAt) ? cfg.trialStudents : current);
+const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
+const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 const trialDaysLeft = (u) => Math.max(0, Math.ceil((new Date(u.trialEndsAt) - Date.now()) / DAY));
 const isPackSubject = (s) => /^(NEET|JEE)/i.test(s);
 const joinLink = (code) => waLink(config.wa.displayNumbers.classcoach, `JOIN ${code}`);
@@ -80,10 +84,12 @@ async function tutorMenu(ctx) {
   const name = u.name ? u.name.split(' ')[0] : '';
   const lines = [];
   if (ctx.isNew) {
-    lines.push(`Welcome to ClassCoach${name ? ', ' + name : ''}! 👋`, 'Make a quiz in seconds, send one link to your class group, and get every student\'s marks here. No app needed.', '', `🎁 Your ${ctx.cfg.trialDays}-day Pro trial is on: up to 100 students, reminders and the NEET/JEE question pack.`);
+    lines.push(`Welcome to ClassCoach${name ? ', ' + name : ''}! 👋`, 'Make a quiz in seconds, send one link to your class group, and get every student\'s marks here. No app needed.', '', `🎁 Your 1-month free trial is on: up to ${ctx.cfg.trialStudents} students, reminders and the 3,600-question NEET bank.`);
   } else {
     lines.push(`Hi${name ? ' ' + name : ''}! 👋`);
-    if (onTrial(u)) lines.push(`Pro trial: ${trialDaysLeft(u)} day${trialDaysLeft(u) === 1 ? '' : 's'} left.`);
+    if (onTrial(u)) lines.push(`Free trial: ${trialDaysLeft(u)} day${trialDaysLeft(u) === 1 ? '' : 's'} left.`);
+    else if (active(u.plan?.until)) lines.push(`${ctx.cfg.plans[u.plan.id]?.title || 'Plan'} active till ${fmtDate(u.plan.until)}.`);
+    else lines.push('⚠️ Your plan has ended: existing students stay, new students can\'t join. Send PLANS to renew.');
   }
   lines.push('', 'What would you like to do?');
   await ctx.buttons(lines.join('\n'), [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:class', '👥 My class']]);
@@ -98,14 +104,14 @@ async function chooseSubject(ctx) {
   await ctx.list('Pick a subject for your quiz:', 'Choose subject', [{
     title: 'Subjects', rows: subjects.map((s) => ({
       id: `cc:subj:${s}`, title: s,
-      description: `${counts[s]} questions${isPackSubject(s) && !hasNeetPack(ctx.user) ? ' · 🔒 Pro pack' : isPackSubject(s) ? ' · NEET/JEE pack' : ''}`,
+      description: `${counts[s]} questions${isPackSubject(s) && !hasNeetPack(ctx.user) ? ' · 🔒 NEET/JEE plan' : isPackSubject(s) ? ' · NEET/JEE bank' : ''}`,
     })),
   }]);
 }
 
 async function chooseTopic(ctx, subject) {
   if (isPackSubject(subject) && !hasNeetPack(ctx.user)) {
-    await ctx.say(`🔒 ${subject} is in the NEET/JEE question pack (4,000+ PCB questions incl. PYQs).`);
+    await ctx.say(`🔒 ${subject} is part of the NEET/JEE plans: 3,600+ chapter-wise PCB questions with PYQs from 2016 onwards.`);
     return plans(ctx);
   }
   await ctx.setSession({ state: 'await_topic', subject });
@@ -168,14 +174,14 @@ async function studentJoin(ctx, code) {
   const tutor = await db.users.findOne({ product: 'classcoach', phone: c.tutorPhone });
   const already = c.students.some((s) => s.phone === ctx.phone);
   if (!already) {
-    const limit = studentLimit(tutor, ctx.cfg);
+    const limit = studentLimit(tutor, ctx.cfg, c.students.length);
     if (c.students.length >= limit + ctx.cfg.graceStudents) {
       await ctx.say(`${c.title} is full right now. Your teacher has been told, and you'll be added as soon as there's room.`);
       await upgradeNudge(tutor, c, true);
       return;
     }
     await db.classes.updateOne({ _id: c._id }, { $push: { students: { phone: ctx.phone, name: ctx.user.name || '', joinedAt: new Date() } } });
-    if (c.students.length + 1 > limit) await upgradeNudge(tutor, c, false);
+    if (c.students.length + 1 >= limit) await upgradeNudge(tutor, c, false);
   }
   if (ctx.user.role !== 'tutor') await ctx.setUser({ role: 'student', classCode: code });
   const quiz = c.quizzes.find((q) => q.id === c.activeQuizId);
@@ -269,9 +275,10 @@ async function upgradeNudge(tutor, c, full) {
   if (tutor.lastUpgradeNudge === today && !full) return;
   await db.users.updateOne({ product: 'classcoach', phone: tutor.phone }, { $set: { lastUpgradeNudge: today } });
   const cfg = (await import('../products.js')).products.classcoach;
+  const limit = studentLimit(tutor, cfg, c.students.length);
   const text = full
     ? `⚠️ ${c.title} is full (${c.students.length} students). A new student just tried to join and is waiting.\nUpgrade to add everyone.`
-    : `🎉 ${c.title} now has ${c.students.length + 1} students, more than the free ${cfg.freeStudents}. They can still join for now.\nUpgrade so nobody is turned away.`;
+    : `🎉 ${c.title} now has ${c.students.length + 1} of ${limit} students. Your class is full now.\nUpgrade so nobody is turned away.`;
   if (within24h(tutor)) await send('classcoach', tutor.phone, { type: 'buttons', text, buttons: [{ id: 'cc:plans', title: '⭐ See plans' }] });
   else if (process.env.TEMPLATE_UPGRADE) await send('classcoach', tutor.phone, { type: 'template', name: process.env.TEMPLATE_UPGRADE, params: [c.title, String(c.students.length)] });
 }
@@ -280,91 +287,93 @@ async function plans(ctx) {
   const p = ctx.cfg.plans;
   const c = await db.classes.findOne({ tutorPhone: ctx.phone });
   const size = c?.students.length || 0;
-  const suggest = size > 50 ? 'pro100' : 'pro50';
+  const fit = (x) => x.students >= Math.max(size, 1) && Object.values(p).filter((y) => y.track === x.track && y.months === x.months && y.students >= Math.max(size, 1)).sort((m, n) => m.students - n.students)[0]?.id === x.id;
   const rows = Object.values(p).map((x) => ({
     id: `cc:buy:${x.id}`,
     title: `${x.best ? '⭐ ' : ''}${x.title}`.slice(0, 24),
-    description: `${rupees(x.price)}/${x.period}${x.anchor ? ` (was ${rupees(x.anchor)})` : ''}${x.desc ? ' · ' + x.desc : ''}${x.id === suggest ? ' · fits your class' : ''}`,
+    description: `${rupees(x.price)} for ${x.months === 12 ? '12 months' : x.months === 1 ? '1 month' : `${x.months} months`}${x.months === 12 ? ' · 2 months free' : ''}${x.track === 'neet_jee' ? ' · NEET bank' : ''}${fit(x) && size ? ' · fits your class' : ''}`,
   }));
-  const head = [`ClassCoach plans`, `Free: up to ${ctx.cfg.freeStudents} students, unlimited quizzes.`];
-  if (onTrial(ctx.user)) head.push(`Your Pro trial ends in ${trialDaysLeft(ctx.user)} days. Upgrade now to keep reminders and up to 100 students.`);
+  const head = ['ClassCoach plans (same as classcoach.in)', '• General: Starter, Growth, Pro, each for 3 months', '• NEET/JEE: adds the 3,600-question NEET bank with PYQs'];
+  if (onTrial(ctx.user)) head.push('', `Your free trial ends in ${trialDaysLeft(ctx.user)} days.`);
+  else if (active(ctx.user.plan?.until)) head.push('', `Current plan runs till ${fmtDate(ctx.user.plan.until)}. Buying now adds on top.`);
   if (size) head.push(`Your class: ${size} students.`);
-  if (friendDiscount(ctx)) head.push(`🎁 Your invite gives you ${rupees(friendDiscount(ctx))} off your first plan.`);
   await ctx.list(head.join('\n'), 'See plans', [{ title: 'Plans', rows }]);
   const f = offerFooter();
   if (f) await ctx.say(`⏳ ${f}`);
 }
 
-// Invited tutors get a discount on their first paid plan
-function friendDiscount(ctx) {
-  const u = ctx.user;
-  return u.referredBy && !u.firstPlanBought ? ctx.cfg.referral.friendDiscount : 0;
-}
-
 async function buy(ctx, planId) {
   const plan = ctx.cfg.plans[planId];
   if (!plan) return plans(ctx);
-  const discount = Math.min(friendDiscount(ctx), plan.price - 1);
-  const amount = plan.price - discount;
-  const order = await createOrder({ product: 'classcoach', phone: ctx.phone, item: planId, title: `ClassCoach ${plan.title}`, amount, meta: { listPrice: plan.price, discount } });
-  await ctx.link(`${plan.title} · ${rupees(amount)}/${plan.period}${discount ? `\n🎁 ${rupees(discount)} invite discount (was ${rupees(plan.price)})` : ''}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
+  const order = await createOrder({ product: 'classcoach', phone: ctx.phone, item: planId, title: `ClassCoach ${plan.title}`, amount: plan.price, meta: {} });
+  await ctx.link(`${plan.title} · ${rupees(plan.price)} for ${plan.months === 1 ? '1 month' : `${plan.months} months`}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
 }
 
 export async function onPaid(ctx, order) {
   const plan = ctx.cfg.plans[order.item];
-  const days = plan.period === 'year' ? 365 : 30;
-  if (plan.addon) {
-    const from = active(ctx.user.addons?.neet) ? new Date(ctx.user.addons.neet) : new Date();
-    await ctx.setUser({ 'addons.neet': new Date(from.getTime() + days * DAY) });
-  } else {
-    const from = active(ctx.user.plan?.until) ? new Date(ctx.user.plan.until) : new Date();
-    await ctx.setUser({ plan: { id: plan.id, students: plan.students, until: new Date(from.getTime() + days * DAY) } });
+  // Like classcoach.in: time left on the current plan is kept and the new plan stacks on top
+  const from = active(ctx.user.plan?.until) ? new Date(ctx.user.plan.until) : new Date();
+  const until = addMonths(from, plan.months);
+  await ctx.setUser({ plan: { id: plan.id, students: plan.students, track: plan.track, until } });
+  await ctx.say(`✅ Payment received: ${rupees(order.amount)}\n${plan.title} is active till ${fmtDate(until)}. Up to ${plan.students} students${plan.track === 'neet_jee' ? ', with the NEET/JEE question bank' : ''}. Thank you! 🙏`);
+  if (!ctx.user.firstPlanBought) {
+    await ctx.setUser({ firstPlanBought: true });
+    if (ctx.user.referredBy) await rewardInviter(ctx);
   }
-  await ctx.say(`✅ Payment received: ${rupees(order.amount)}\n${plan.title} is active for ${plan.period === 'year' ? '12 months' : '30 days'}. Thank you! 🙏`);
-  const firstPlan = !ctx.user.firstPlanBought;
-  if (firstPlan) await ctx.setUser({ firstPlanBought: true });
-  if (firstPlan && ctx.user.referredBy && !ctx.user.refRewarded) await rewardInviter(ctx);
   await ctx.buttons('What next?', [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:refer', '🎁 Refer & earn']]);
 }
 
-// ---- Refer & earn ----------------------------------------------------------
+// ---- Refer & earn (classcoach.in rule: every 2 invited teachers who buy → 3 months free) -----
 async function joinWithInvite(ctx, code) {
   const u = ctx.user;
   const inviter = await db.users.findOne({ product: 'classcoach', refCode: code, role: 'tutor' });
   if (!inviter || inviter.phone === ctx.phone || u.referredBy || u.firstPlanBought) return;
   await ctx.setUser({ referredBy: inviter.phone });
-  await ctx.say(`🎁 You were invited by a fellow teacher. You get ${rupees(ctx.cfg.referral.friendDiscount)} off your first ClassCoach plan, on top of your free ${ctx.cfg.trialDays}-day Pro trial.`);
+  await ctx.say(`🤝 You were invited by a fellow teacher. Enjoy your free 1-month trial!`);
 }
 
 async function rewardInviter(ctx) {
-  const days = ctx.cfg.referral.rewardDays;
-  await ctx.setUser({ refRewarded: true });
+  const r = ctx.cfg.referral;
   const inv = await db.users.findOne({ product: 'classcoach', phone: ctx.user.referredBy });
   if (!inv) return;
-  const from = active(inv.plan?.until) ? new Date(inv.plan.until) : new Date();
-  const plan = inv.plan && active(inv.plan.until) ? { ...inv.plan } : { id: 'pro50', students: ctx.cfg.plans.pro50.students };
-  plan.until = new Date(from.getTime() + days * DAY);
-  const updated = await db.users.updateOne({ _id: inv._id }, { $set: { plan }, $inc: { referrals: 1 } });
-  if (within24h(updated)) {
-    await send('classcoach', inv.phone, { type: 'text', text: `🎉 A teacher you invited just upgraded ClassCoach.
-You got ${days} days of Pro free. Pro now runs till ${plan.until.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}.
-
-Invite more teachers: send REFER` });
+  const bought = await db.users.count({ product: 'classcoach', referredBy: inv.phone, firstPlanBought: true });
+  const earned = Math.floor(bought / r.needed);
+  const fresh = earned - (inv.referralRewardsGranted || 0);
+  const patch = { referralRewardsGranted: earned, referrals: bought };
+  let untilText = '';
+  if (fresh > 0) {
+    const months = r.rewardMonths * fresh;
+    if (active(inv.plan?.until) || !active(inv.trialEndsAt)) {
+      const from = active(inv.plan?.until) ? new Date(inv.plan.until) : new Date();
+      const plan = inv.plan?.id ? { ...inv.plan } : { id: 'growth', students: ctx.cfg.plans.growth.students, track: 'general' };
+      plan.until = addMonths(from, months);
+      patch.plan = plan; untilText = fmtDate(plan.until);
+    } else {
+      patch.trialEndsAt = addMonths(inv.trialEndsAt, months); untilText = fmtDate(patch.trialEndsAt);
+    }
   }
+  const updated = await db.users.updateOne({ _id: inv._id }, { $set: patch });
+  if (!within24h(updated)) return;
+  const text = fresh > 0
+    ? `🎉 Referral reward! ${bought} teachers you invited have bought ClassCoach. ${r.rewardMonths * fresh} months added free, now till ${untilText}.`
+    : `🙌 A teacher you invited just bought ClassCoach. ${r.needed - (bought % r.needed)} more and you get ${r.rewardMonths} months free.`;
+  await send('classcoach', inv.phone, { type: 'text', text });
 }
 
 async function refer(ctx) {
   const r = ctx.cfg.referral;
   const u = ctx.user;
   const link = waLink(config.wa.displayNumbers.classcoach, `Hi CREF ${u.refCode}`);
-  await ctx.say(`🎁 Refer & earn\n• Teachers you invite get ${rupees(r.friendDiscount)} off their first plan, plus the free ${ctx.cfg.trialDays}-day trial\n• You get ${r.rewardDays} days of Pro free for every teacher who upgrades\n• No limit: 12 teachers = a full year free\n\nTeachers who upgraded: ${u.referrals || 0}\n\nForward the message below to teacher friends and groups 👇`);
-  await ctx.say(`I make class quizzes on WhatsApp in seconds with ClassCoach. Students answer from a link, marks come back to me automatically, no app needed. Try it free with my link and get ${rupees(r.friendDiscount)} off when you upgrade: ${link || 'message ClassCoach and send CREF ' + u.refCode}`);
+  const bought = await db.users.count({ product: 'classcoach', referredBy: ctx.phone, firstPlanBought: true });
+  const toNext = r.needed - (bought % r.needed);
+  await ctx.say(`🎁 Refer & earn\n• Teachers you invite get a free 1-month trial\n• Every ${r.needed} teachers who buy a plan = ${r.rewardMonths} months free for you\n• No limit: 8 teachers = a full year free\n\nTeachers who bought: ${bought} · ${toNext} more for your next ${r.rewardMonths} free months\n\nForward the message below to teacher friends and groups 👇`);
+  await ctx.say(`I make class quizzes on WhatsApp in seconds with ClassCoach. Students answer from a link, marks come back to me automatically, no app needed. Try it free for a month with my link: ${link || 'message ClassCoach and send CREF ' + u.refCode}`);
 }
 
 async function classInfo(ctx) {
   const c = await getClass(ctx);
-  const limit = studentLimit(ctx.user, ctx.cfg);
-  await ctx.say(`👥 ${c.title}\nStudents: ${c.students.length} of ${limit}${onTrial(ctx.user) ? ' (Pro trial)' : ''}\nClass code: ${c.code}\n\nStudents join by tapping:\n${joinLink(c.code) || `Message ClassCoach and send: JOIN ${c.code}`}`);
+  const limit = studentLimit(ctx.user, ctx.cfg, c.students.length);
+  await ctx.say(`👥 ${c.title}\nStudents: ${c.students.length} of ${limit}${onTrial(ctx.user) ? ' (free trial)' : ''}\nClass code: ${c.code}\n\nStudents join by tapping:\n${joinLink(c.code) || `Message ClassCoach and send: JOIN ${c.code}`}`);
   await ctx.buttons('Options', [['cc:rename', '✏️ Rename class'], ['cc:plans', '⭐ Plans'], ['cc:refer', '🎁 Refer & earn']]);
 }
 

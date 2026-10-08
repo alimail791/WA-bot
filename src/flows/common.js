@@ -17,7 +17,7 @@ export async function startChatQuiz(ctx, { n, subject, topic, tag, qids }) {
     await ctx.say('No questions are loaded yet for this. Please try again later.');
     return false;
   }
-  await ctx.setSession({ state: 'quiz', quiz: { qids, i: 0, score: 0, wrong: [], tag } });
+  await ctx.setSession({ state: 'quiz', quiz: { qids, i: 0, score: 0, wrong: [], wrongIds: [], tag } });
   await askQuestion(ctx);
   return true;
 }
@@ -46,7 +46,7 @@ export async function answerQuestion(ctx, replyId) {
   const right = Number(optStr) === q.answer;
   const note = q.explanation ? `\n💡 ${q.explanation}` : '';
   if (right) { quiz.score++; await ctx.say('✅ Correct!' + note); }
-  else { quiz.wrong.push(q.topic || q.subject); await ctx.say(`❌ Correct answer: ${q.options[q.answer]}${note}`); }
+  else { quiz.wrong.push(q.topic || q.subject); (quiz.wrongIds ||= []).push(q._id); await ctx.say(`❌ Correct answer: ${q.options[q.answer]}${note}`); }
   quiz.i++;
   await ctx.setUser({ seenQ: [...(ctx.user.seenQ || []), q._id].slice(-500) });
   if (quiz.i < quiz.qids.length) {

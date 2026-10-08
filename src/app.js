@@ -82,7 +82,7 @@ export function createApp() {
     const user = await getUser(row.product, row.phone);
     const attempt = await db.attempts.insertOne({
       product: row.product, phone: row.phone, name: user?.name || '', kind: row.kind, ref: row.ref, title: row.title,
-      answers, answered: Object.keys(answers).length, correct: g.correct, total: g.total, bySubject: g.bySubject, weak: g.weak, at: new Date(),
+      answers, answered: Object.keys(answers).length, correct: g.correct, total: g.total, bySubject: g.bySubject, weak: g.weak, wrongIds: g.wrongIds, at: new Date(),
     });
     try { await dispatchAttempt(attempt); } catch (e) { console.error('[attempt] follow-up failed', e); }
     return { status: 200, row, questions, attempt };
