@@ -44,9 +44,7 @@ export async function syncFrom(source) {
   let created = 0, updated = 0, questionsWritten = 0;
 
   let failed = 0, done = 0;
-  const valid = source.tests.filter((t) => t?.id && Array.isArray(t.questions) && t.questions.length);
-  valid.forEach((t) => seenIds.add(t.id));
-  console.log(`[testmandi-sync] starting: ${valid.length} tests, ${(source.bundles || []).length} bundles`);
+  console.log('[testmandi-sync] starting');
   const one = async (t) => {
     try {
     const existing = await db.tests.findOne({ tmId: t.id });
@@ -93,9 +91,17 @@ export async function syncFrom(source) {
       console.error(`[testmandi-sync] skipped test ${t.id}: ${e.message}`);
     }
     done++;
-    if (done % 100 === 0) console.log(`[testmandi-sync] ${done}/${valid.length} tests`);
+    if (done % 100 === 0) console.log(`[testmandi-sync] ${done} tests synced`);
   };
-  for (let i = 0; i < valid.length; i += 10) await Promise.all(valid.slice(i, i + 10).map(one));
+  // Tests may be an array or a database cursor; take 10 at a time so memory stays small
+  let batch = [];
+  for await (const t of source.tests) {
+    if (!t?.id || !Array.isArray(t.questions) || !t.questions.length) continue;
+    seenIds.add(t.id);
+    batch.push(t);
+    if (batch.length === 10) { await Promise.all(batch.map(one)); batch = []; }
+  }
+  if (batch.length) await Promise.all(batch.map(one));
 
   // Tests removed from testmandi.in stop being sold here
   const stale = await db.tests.find({ source: 'testmandi', type: 'test' });
@@ -139,12 +145,13 @@ export async function syncFrom(source) {
 export async function syncFromTestMandi() {
   const tm = otherDb(tmDbName());
   if (!tm) return null;
-  const [tests, bundles, users, settings] = await Promise.all([
-    tm.collection('tests').find({}).toArray(),
+  console.log(`[testmandi-sync] reading from database "${tmDbName()}"`);
+  const [bundles, users, settings] = await Promise.all([
     tm.collection('bundles').find({}).toArray(),
     tm.collection('users').find({ role: 'seller' }, { projection: { email: 1, phone: 1, role: 1, referralCode: 1, name: 1, businessName: 1 } }).toArray(),
     tm.collection('meta').findOne({ _id: 'settings' }),
   ]);
+  const tests = tm.collection('tests').find({}).batchSize(20); // streamed, not loaded all at once
   return syncFrom({ tests, bundles, users, sellerSharePercent: settings?.sellerSharePercent });
 }
 
