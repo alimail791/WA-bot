@@ -274,3 +274,17 @@ test('One shared number: user picks a product, deep links route directly', async
   await hook('919000000091', { type: 'text', text: { body: 'JOIN ABCDE' } }); await wait();
   assert.match(textOf(fresh('classcoach', '919000000091')), /couldn't find class/);
 });
+
+test('Template messages go through AiSensy Campaign API when its key is set', async () => {
+  const { send } = await import('../src/providers/index.js');
+  const realFetch = globalThis.fetch, prev = { p: config.provider, k: config.aisensy.apiKey };
+  let call;
+  globalThis.fetch = async (url, opts) => { call = { url, body: JSON.parse(opts.body) }; return new Response('{"success":true}', { status: 200 }); };
+  try {
+    config.provider = 'meta'; config.aisensy.apiKey = 'KEY123';
+    const r = await send('yneet', '919000000099', { type: 'template', name: 'daily_quiz', params: [3] });
+    assert.equal(r.ok, true);
+    assert.match(call.url, /aisensy\.com\/campaign/);
+    assert.deepEqual(call.body, { apiKey: 'KEY123', campaignName: 'daily_quiz', destination: '919000000099', userName: 'Raise Academy', templateParams: ['3'], source: 'wa-bot' });
+  } finally { globalThis.fetch = realFetch; config.provider = prev.p; config.aisensy.apiKey = prev.k; }
+});

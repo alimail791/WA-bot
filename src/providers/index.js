@@ -7,6 +7,7 @@
 import { config } from '../config.js';
 import * as meta from './meta.js';
 import * as sim from './sim.js';
+import * as aisensy from './aisensy.js';
 
 const providers = { meta, sim };
 
@@ -15,6 +16,10 @@ export function provider() {
 }
 
 export async function send(product, phone, msg) {
+  // Template messages can go through AiSensy's Campaign API when its key is set
+  if (msg.type === 'template' && config.aisensy.apiKey && config.provider !== 'sim') {
+    return aisensy.sendTemplate(phone, msg);
+  }
   return provider().send(product, phone, clamp(msg));
 }
 

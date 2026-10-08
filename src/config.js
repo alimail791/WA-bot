@@ -36,6 +36,12 @@ export const config = {
     businessName: env.WA_BUSINESS_NAME || 'Raise Academy',
   },
 
+  // AiSensy Campaign API (template messages only)
+  aisensy: {
+    apiKey: env.AISENSY_API_KEY || '',
+    url: env.AISENSY_CAMPAIGN_URL || 'https://backend.aisensy.com/campaign/t1/api/v2',
+  },
+
   // Payments: Razorpay Payment Links. Without keys, a dev payment page is used.
   razorpay: {
     keyId: env.RAZORPAY_KEY_ID || '',

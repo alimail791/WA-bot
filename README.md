@@ -59,6 +59,11 @@ The bot speaks the **WhatsApp Cloud API** format (interactive buttons, lists, UR
 - You can move to separate numbers later with `WA_PHONE_ID_YNEET` / `_TESTMANDI` / `_CLASSCOACH`.
 - Your existing WhatsApp AI agent should not be on the same number, or two bots will answer each message.
 
+#### AiSensy API key
+The normal AiSensy API key (Manage → API Key) is for **API campaigns**: it sends approved templates only. It does not deliver incoming messages to this bot and cannot send buttons, lists or free replies, so it cannot run the conversations on its own.
+- Set `AISENSY_API_KEY` to send the reminder templates (daily quiz, parent report, seller sale, class quiz, upgrade, trial ending) through AiSensy. Create one API campaign per template in AiSensy and put the **campaign name** in the matching `TEMPLATE_*` variable.
+- For the two-way bot, you also need Cloud API access for the number (`WA_TOKEN` + `WA_PHONE_ID_SHARED`), either directly from Meta or from AiSensy if they offer Cloud API passthrough with an incoming-message webhook on your plan.
+
 ### 3. Connect Razorpay
 1. Add `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`.
 2. Razorpay Dashboard → Webhooks → URL `https://<domain>/webhooks/razorpay`, event `payment_link.paid`, set a secret and copy it to `RAZORPAY_WEBHOOK_SECRET`.
