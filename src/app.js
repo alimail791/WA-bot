@@ -125,7 +125,7 @@ export function createApp() {
     res.send(messagePage(order?.product, 'Payment', order ? 'Thank you! Your payment is being confirmed. Go back to WhatsApp — your purchase will be there in a moment.' : 'Order not found.', backToChat(order?.product)));
   });
 
-  if (!config.razorpay.keyId) {
+  if (!config.razorpay.keyId && config.provider === 'sim') {
     app.get('/dev/pay/:id', async (req, res) => {
       const order = await db.orders.findOne({ _id: req.params.id });
       if (!order) return res.status(404).send('Order not found');

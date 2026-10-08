@@ -288,3 +288,12 @@ test('Template messages go through AiSensy Campaign API when its key is set', as
     assert.deepEqual(call.body, { apiKey: 'KEY123', campaignName: 'daily_quiz', destination: '919000000099', userName: 'Raise Academy', templateParams: ['3'], source: 'wa-bot' });
   } finally { globalThis.fetch = realFetch; config.provider = prev.p; config.aisensy.apiKey = prev.k; }
 });
+
+test('Live mode without Razorpay never gives out the free test-payment page', async () => {
+  const { createOrder } = await import('../src/payments.js');
+  const prev = config.provider;
+  config.provider = 'meta';
+  try {
+    await assert.rejects(createOrder({ product: 'yneet', phone: '919000000112', item: 'pack10', title: 'x', amount: 199 }), (e) => e.code === 'NO_PAYMENTS');
+  } finally { config.provider = prev; }
+});

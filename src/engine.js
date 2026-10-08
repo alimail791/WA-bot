@@ -75,6 +75,9 @@ export async function handleInbound({ product, phone, name = '', text = '', repl
   try {
     await flows[product].handle(ctx, input);
   } catch (err) {
+    if (err.code === 'NO_PAYMENTS') {
+      return ctx.say('Thanks for your interest! 🙏 Online payment is being set up right now. Reply here with "PAY" and our team will send you the payment details personally.');
+    }
     console.error(`[${product}] flow error for ${phone}:`, err);
     await ctx.say('Sorry, something went wrong on our side. Send MENU to start again.');
   }

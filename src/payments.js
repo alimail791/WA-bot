@@ -4,7 +4,16 @@ import { config } from './config.js';
 import { hmac, safeEqual } from './util.js';
 import { dispatchPaid, track } from './engine.js';
 
+export class PaymentsNotReady extends Error {
+  constructor() { super('Payments not configured'); this.code = 'NO_PAYMENTS'; }
+}
+
 export async function createOrder({ product, phone, item, title, amount, meta = {} }) {
+  // Live WhatsApp without Razorpay: never hand out the free test-payment page
+  if (!config.razorpay.keyId && config.provider !== 'sim') {
+    await track(product, phone, 'order_blocked_no_payments', { item, amount });
+    throw new PaymentsNotReady();
+  }
   // Reuse a recent unpaid order for the same item so repeated taps don't create many links
   const recent = await db.orders.findOne({ product, phone, item, status: 'created', createdAt: { $gte: new Date(Date.now() - 6 * 3600e3) } });
   if (recent && recent.amount === amount) return recent;
