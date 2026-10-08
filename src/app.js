@@ -47,8 +47,13 @@ export function createApp() {
       if (ev.id) seen.set(ev.id, Date.now());
       if (seen.size > 5000) for (const [k, t] of seen) if (Date.now() - t > 3600e3) seen.delete(k);
       let product = productForNumber(ev.phoneNumberId);
-      if (!product && ev.phoneNumberId === config.wa.sharedNumberId) product = await productOnSharedNumber(ev);
-      if (!product) { console.warn('[wa] message for unknown number', ev.phoneNumberId); continue; }
+      const shared = !product && ev.phoneNumberId === config.wa.sharedNumberId;
+      if (shared) product = await productOnSharedNumber(ev);
+      if (!product) {
+        // On the shared number, no product yet means we just sent the "what are you here for?" menu
+        if (!shared) console.warn('[wa] message for unknown number', ev.phoneNumberId);
+        continue;
+      }
       handleInbound({ product, phone: ev.from, name: ev.name, text: ev.text, replyId: ev.replyId }).catch((e) => console.error(e));
     }
   });
