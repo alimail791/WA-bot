@@ -6,7 +6,8 @@ import { startCron } from './nudges.js';
 
 await connect();
 if (config.store === 'memory' || process.env.SEED_SAMPLE === 'true') {
-  if (await seed()) console.log('Loaded sample questions and tests');
+  const withTests = config.store === 'memory';
+  if (await seed({ withTests })) console.log(withTests ? 'Loaded sample questions and tests' : 'Loaded sample questions');
 }
 if (config.enableCron) startCron();
 

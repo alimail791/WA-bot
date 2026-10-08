@@ -79,9 +79,10 @@ const GK = [
   ['General Awareness', 'Geography', 'The Tropic of Cancer does NOT pass through:', ['Rajasthan', 'Odisha', 'Tripura'], 1],
 ];
 
-export async function seed({ force = false } = {}) {
+export async function seed({ force = false, withTests = true } = {}) {
   if (!force && (await db.questions.count({})) > 0) return false;
   await db.questions.insertMany([...NEET.map(Q('yneet')), ...CLASS.map(Q('classcoach')), ...GK.map(Q('testmandi'))]);
+  if (!withTests) return true; // production: questions only, no demo seller or tests
   const gk = await db.questions.find({ product: 'testmandi' });
   const ids = gk.map((q) => q._id);
   const seller = { sellerPhone: '919999900001', sellerName: 'Raise Academy', sellerShare: 0.7 };
