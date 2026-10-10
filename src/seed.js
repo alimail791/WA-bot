@@ -85,7 +85,7 @@ export async function seed({ force = false, withTests = true } = {}) {
   if (!withTests) return true; // production: questions only, no demo seller or tests
   const gk = await db.questions.find({ product: 'testmandi' });
   const ids = gk.map((q) => q._id);
-  const seller = { sellerPhone: '919999900001', sellerName: 'Raise Academy', sellerShare: 0.7 };
+  const seller = { sellerPhone: '919999900001', sellerName: 'Raise Academy', sellerShare: 0.8 };
   const base = { attemptsCount: 0, salesCount: 0, ratingSum: 0, ratingCount: 0, revenue: 0, createdAt: new Date(), listed: true, language: 'English', type: 'test' };
   await db.tests.insertMany([
     { ...base, ...seller, code: 'SSC-GK-101', title: 'SSC CGL GK Mock 1', category: 'SSC', price: 29, durationMin: 10, qids: ids.slice(0, 8) },

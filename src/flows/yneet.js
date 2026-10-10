@@ -14,7 +14,7 @@ import { rupees } from '../products.js';
 import { within24h } from '../engine.js';
 import { chapters, pyqYears } from '../bank.js';
 import * as bridge from '../yneetBridge.js';
-import { startChatQuiz, answerQuestion, bumpStreak, todayCount, offerFooter, pendingOrder } from './common.js';
+import { startChatQuiz, answerQuestion, bumpStreak, todayCount, offerFooter, pendingOrder, switchRows } from './common.js';
 
 const SUBJECTS = ['Physics', 'Chemistry', 'Biology'];
 const SUBJ_ICON = { Physics: '⚛️', Chemistry: '🧪', Biology: '🧬' };
@@ -147,7 +147,7 @@ async function moreMenu(ctx) {
       { id: 'y:parent', title: '👪 Parent report', description: 'Weekly progress to your parent' },
       { id: 'y:remind', title: '⏰ Daily 7 PM quiz', description: 'Keep your streak going' },
       { id: 'y:class', title: '🎓 Change class', description: u.classLevel ? `Now: ${u.classLevel}` : 'Set your class' },
-    ],
+    ].filter((r) => !(switchRows().length && r.id === 'y:remind')).concat(switchRows()),
   }]);
 }
 

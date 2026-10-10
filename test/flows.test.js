@@ -245,7 +245,7 @@ test('TestMandi: sample → buy → test → rank, seller gets alert with share'
   assert.ok(choice(m, 'SSC-GK-PACK'), 'bundle offered after the test');
   const sm = fresh(P, seller);
   assert.match(textOf(sm), /New sale · SSC CGL GK Mock 1/);
-  assert.match(textOf(sm), /Your share ₹20.3/);
+  assert.match(textOf(sm), /Your share ₹23.2/);
 });
 
 test('TestMandi: bundle unlocks all its tests', async () => {
@@ -373,6 +373,16 @@ test('One shared number: user picks a product, deep links route directly', async
   assert.match(textOf(fresh('testmandi', ph)), /Welcome to TestMandi/);
   await hook(ph, { type: 'text', text: { body: 'Hi' } }); await wait();
   assert.match(textOf(fresh('testmandi', ph)), /Hi! 👋/, 'remembers the chosen product');
+  // More menu has Switch product; tapping it shows the product picker again
+  await hook(ph, { type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'tm:more', title: 'More' } } }); await wait();
+  assert.ok(choice(fresh('testmandi', ph), 'pick:switch'), 'Switch product in TestMandi More menu');
+  await hook(ph, { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: 'pick:switch', title: 'Switch product' } } }); await wait();
+  assert.match(textOf(fresh('yneet', ph)), /What are you here for/);
+  await hook(ph, { type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'pick:classcoach', title: "I'm a teacher" } } }); await wait();
+  fresh('classcoach', ph);
+  await hook(ph, { type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'cc:more', title: 'More' } } }); await wait();
+  const ccm = fresh('classcoach', ph);
+  assert.ok(choice(ccm, 'cc:refer') && choice(ccm, 'pick:switch'), 'ClassCoach More has Refer & earn and Switch');
   await hook('919000000091', { type: 'text', text: { body: 'JOIN ABCDE' } }); await wait();
   assert.match(textOf(fresh('classcoach', '919000000091')), /couldn't find class/);
 });
@@ -485,7 +495,7 @@ test('TestMandi seller referral: inviter earns 5% of the new seller\'s sales', a
   const after = await db.users.findOne({ product: P, phone: inviter });
   assert.equal(Math.round((after.seller.earnings - before) * 100) / 100, 5);
   assert.match(textOf(fresh(P, inviter)), /Referral bonus: ₹5/);
-  assert.equal((await db.users.findOne({ product: P, phone: teacher })).seller.earnings, 70);
+  assert.equal((await db.users.findOne({ product: P, phone: teacher })).seller.earnings, 80);
 });
 
 test('ClassCoach referral: every 2 invited teachers who buy = 3 months free', async () => {
@@ -550,6 +560,16 @@ test('TestMandi sync: tests, bundles and sellers come from testmandi.in; WhatsAp
   assert.match(textOf(s), /RAIS1234/);
   const inv = await say(P, '919000000301', 'Hi SREF RAIS1234');
   assert.match(textOf(inv), /Enter referral code \*RAIS1234\*/);
+  // A TestMandi seller who invites a student gets ₹200 in their TestMandi payout on the student's first purchase
+  const ref = await say(P, '919876543210', 'REFER');
+  assert.match(textOf(ref), /₹200 in your TestMandi payout/);
+  const sellerCode = (await db.users.findOne({ product: P, phone: '919876543210' })).refCode;
+  await say(P, '919000000302', `Hi TREF ${sellerCode}`);
+  const m2 = await say(P, '919000000302', '', `tm:buy:${code}`);
+  await payLink(lastLink(m2).url);
+  const bonus = sales.find((x) => x.coll === 'sellerReferral');
+  assert.equal(bonus?.rec.email, 'raise@tm.in');
+  assert.equal(bonus?.rec.amount, 200);
   sync.setSaleSink(null);
 });
 
@@ -615,4 +635,43 @@ test('Owner dashboard needs the admin key and shows numbers per product', async 
   assert.equal(r.status, 200);
   const html = await r.text();
   assert.match(html, /YNeet/); assert.match(html, /TestMandi/); assert.match(html, /ClassCoach/); assert.match(html, /Last 7 days/);
+});
+
+test('TestMandi live tests: synced schedule, Live row, link at start, attempt on live leaderboard', async () => {
+  const sync = await import('../src/testmandiSync.js');
+  const tmf = await import('../src/flows/testmandi.js');
+  const t = await db.tests.findOne({ code: 'SSC-GK-101' });
+  await db.tests.updateOne({ code: t.code }, { $set: { tmId: 'tm_live_1' } });
+  const start = Date.now() + 60 * 60e3;
+  assert.equal(await sync.syncLive([{ id: 'st_1', testId: 'tm_live_1', scheduledStart: start, joinWindowMinutes: 30 }]), 1);
+  const P = 'testmandi', ph = '919000000600';
+  await say(P, ph, 'Hi');
+  const b = await say(P, ph, 'BROWSE');
+  assert.ok(choice(b, 'tm:live'), 'Live tests row in browse');
+  const l = await say(P, ph, '', 'tm:live');
+  assert.ok(choice(l, 'tm:card:SSC-GK-101'));
+  const card = await say(P, ph, '', 'tm:card:SSC-GK-101');
+  assert.match(textOf(card), /🔴 Live .* join within 30 min/);
+  // buy, then the window opens: owner gets the join link once
+  const m = await say(P, ph, '', 'tm:buy:SSC-GK-101');
+  await payLink(lastLink(m).url);
+  fresh(P, ph);
+  assert.ok(await tmf.notifyLiveStarts(start + 60e3) >= 1);
+  assert.equal(await tmf.notifyLiveStarts(start + 120e3), 0, 'only once');
+  const link = lastLink(fresh(P, ph));
+  assert.match(link.text, /LIVE now/);
+  // attempt inside the window goes to testmandi.in attempts with scheduledTestId
+  const recs = [];
+  sync.setSaleSink((coll, rec) => recs.push({ coll, rec }));
+  await db.tests.updateOne({ code: t.code }, { $set: { live: [{ id: 'st_1', start: Date.now() - 60e3, windowMin: 30 }], liveUntil: Date.now() + 29 * 60e3 } });
+  const token = link.url.split('/t/')[1];
+  await fetch(`${base}/t/${token}`);
+  await fetch(`${base}/t/${token}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: '' });
+  await new Promise((r) => setTimeout(r, 50));
+  const at = recs.find((x) => x.coll === 'attempts');
+  assert.equal(at?.rec.scheduledTestId, 'st_1');
+  assert.match(textOf(fresh(P, ph)), /live leaderboard/);
+  sync.setSaleSink(null);
+  await sync.syncLive([]);
+  assert.equal((await db.tests.findOne({ code: t.code })).liveUntil, 0, 'cancelled sessions are cleared');
 });

@@ -13,7 +13,7 @@ import { send } from '../providers/index.js';
 import { rupees } from '../products.js';
 import { code as newCode, waLink, DAY, istDate, maskPhone, refCodeFor } from '../util.js';
 import { within24h } from '../engine.js';
-import { offerFooter } from './common.js';
+import { offerFooter, switchRows } from './common.js';
 import * as ccWeb from '../classcoachBridge.js';
 
 const active = (until) => until && new Date(until) > new Date();
@@ -81,6 +81,7 @@ export async function handle(ctx, input) {
     if (cmd === 'plans') return plans(ctx);
     if (cmd === 'buy') return buy(ctx, a);
     if (cmd === 'class') return classInfo(ctx);
+    if (cmd === 'more') return ccMore(ctx);
     if (cmd === 'refer') return refer(ctx);
     if (cmd === 'rename') { await ctx.go('await_classname'); return ctx.say('Send the new class name, like "Class 10 Science · Evening batch".'); }
   }
@@ -118,7 +119,20 @@ async function tutorMenu(ctx) {
     else lines.push('⚠️ Your plan has ended: existing students stay, new students can\'t join. Send PLANS to renew.');
   }
   lines.push('', 'What would you like to do?');
-  await ctx.buttons(lines.join('\n'), [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:class', '👥 My class']]);
+  await ctx.buttons(lines.join('\n'), [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:more', '⭐ More']]);
+}
+
+async function ccMore(ctx) {
+  const r = ctx.cfg.referral;
+  await ctx.list('More options', 'Open', [{
+    title: 'ClassCoach', rows: [
+      { id: 'cc:class', title: '👥 My class', description: 'Join link, students, rename' },
+      { id: 'cc:remind', title: '⏰ Remind pending', description: 'Nudge students who haven\'t answered' },
+      { id: 'cc:plans', title: '💎 Plans & prices', description: 'From ₹499 for 3 months' },
+      { id: 'cc:refer', title: '🎁 Refer & earn', description: `Every ${r.needed} teachers who buy = ${r.rewardMonths} months free` },
+      ...switchRows(),
+    ],
+  }]);
 }
 
 async function chooseSubject(ctx) {

@@ -15,8 +15,8 @@ import { send } from '../providers/index.js';
 import { rupees } from '../products.js';
 import { maskPhone, fmtNum, waLink, istDate, refCodeFor, DAY } from '../util.js';
 import { within24h } from '../engine.js';
-import { startChatQuiz, answerQuestion, pendingOrder } from './common.js';
-import { recordSaleInTestMandi } from '../testmandiSync.js';
+import { startChatQuiz, answerQuestion, pendingOrder, switchRows } from './common.js';
+import { recordSaleInTestMandi, creditSellerReferral, recordLiveAttempt } from '../testmandiSync.js';
 
 const shareLink = (code) => waLink(config.wa.displayNumbers.testmandi, `TEST ${code}`);
 const rating = (t) => (t.ratingCount >= 5 ? `⭐ ${(t.ratingSum / t.ratingCount).toFixed(1)} (${fmtNum(t.ratingCount)})` : '🆕 New');
@@ -24,6 +24,12 @@ const owns = (u, code) => (u.purchases || []).includes(code);
 const priceTag = (p) => (p > 0 ? rupees(p) : 'FREE');
 const LISTED = { type: { $ne: 'bundle' }, listed: { $ne: false } };
 const round2 = (n) => Math.round(n * 100) / 100;
+
+// ---- Live tests (synced from testmandi.in scheduled tests) ----
+const liveOpen = (l, now = Date.now()) => now >= l.start && now <= l.start + l.windowMin * 60e3;
+const liveNext = (t, now = Date.now()) => (t.live || []).find((l) => l.start + l.windowMin * 60e3 >= now) || null;
+export const fmtLive = (ms) => new Date(ms).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+const liveTag = (l) => (liveOpen(l) ? '🔴 LIVE now' : `🔴 Live ${fmtLive(l.start)}`);
 
 export async function handle(ctx, input) {
   const { replyId, upper, text } = input;
@@ -47,6 +53,7 @@ export async function handle(ctx, input) {
   if (upper === 'SELLER' || upper === 'MY SALES') return sellerStats(ctx);
   if (upper === 'REFER' || upper === 'WALLET') return referBuyer(ctx);
   if (upper === 'BROWSE' || upper === 'TESTS') return browse(ctx);
+  if (upper === 'LIVE') return liveList(ctx);
   const search = upper.match(/^(?:SEARCH|FIND)\s+(.+)/);
   if (search) return runSearch(ctx, text.slice(text.indexOf(' ') + 1));
   if (state === 'await_search' && text && !replyId) return runSearch(ctx, text);
@@ -65,6 +72,7 @@ export async function handle(ctx, input) {
     if (cmd === 'pop') return listTests(ctx, null, Number(a) || 0);
     if (cmd === 'search') { await ctx.go('await_search'); return ctx.say('🔍 Type what you\'re looking for, like "SSC GK", "NEET biology" or a teacher\'s name.'); }
     if (cmd === 'mine') return myTests(ctx);
+    if (cmd === 'live') return liveList(ctx);
     if (cmd === 'more') return moreMenu(ctx);
     if (cmd === 'refer') return referBuyer(ctx);
     if (cmd === 'sell') return sellInfo(ctx);
@@ -98,6 +106,7 @@ async function moreMenu(ctx) {
       isSeller
         ? { id: 'tm:sales', title: '💰 My sales', description: 'Earnings, share links, invite teachers' }
         : { id: 'tm:sell', title: '🧑‍🏫 Sell your tests', description: `Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale` },
+      ...switchRows(),
     ],
   }]);
 }
@@ -110,19 +119,34 @@ async function browse(ctx, page = 0) {
   const counts = {};
   for (const t of tests) { const c = t.category || 'Other'; counts[c] = (counts[c] || 0) + 1; }
   const cats = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  if (cats.length <= 1) return listTests(ctx, null, 0);
-  // 10 rows max: first page has Popular + Search, every page may have "More categories"
-  const perPage = page === 0 ? 7 : 8;
-  const start = page === 0 ? 0 : 7 + (page - 1) * 8;
+  const liveCount = await db.tests.count({ ...LISTED, liveUntil: { $gte: Date.now() } });
+  if (cats.length <= 1 && !liveCount) return listTests(ctx, null, 0);
+  // 10 rows max: first page has Popular + Search (+ Live), every page may have "More categories"
+  const first = liveCount ? 6 : 7;
+  const perPage = page === 0 ? first : 8;
+  const start = page === 0 ? 0 : first + (page - 1) * 8;
   const slice = cats.slice(start, start + perPage);
   const more = start + perPage < cats.length;
   const rows = [
+    ...(page === 0 && liveCount ? [{ id: 'tm:live', title: '🔴 Live tests', description: `${liveCount} live test${liveCount > 1 ? 's' : ''}: compete on one leaderboard` }] : []),
     ...(page === 0 ? [{ id: 'tm:pop:0', title: '🔥 Most popular', description: `Top tests across all ${fmtNum(tests.length)}` }] : []),
     ...slice.map(([c, n]) => ({ id: `tm:cat:${encodeURIComponent(c)}:0`, title: c, description: `${n} test${n > 1 ? 's' : ''}` })),
     ...(more ? [{ id: `tm:cats:${page + 1}`, title: '➡️ More categories', description: `${cats.length - start - perPage} more exams` }] : []),
     page === 0 ? { id: 'tm:search', title: '🔍 Search', description: 'Type an exam, subject or teacher' } : { id: 'tm:cats:0', title: '⬅️ Back to start' },
   ];
   await ctx.list(page === 0 ? `📚 ${fmtNum(tests.length)} tests in ${cats.length} exams. Pick one, or search:` : `More exams (page ${page + 1}):`, 'Categories', [{ title: 'Exams', rows }]);
+}
+
+async function liveList(ctx) {
+  await ctx.go('idle');
+  const now = Date.now();
+  const tests = (await db.tests.find({ ...LISTED, liveUntil: { $gte: now } }))
+    .map((t) => ({ t, l: liveNext(t, now) })).filter((x) => x.l).sort((a, b) => a.l.start - b.l.start).slice(0, 9);
+  if (!tests.length) return ctx.buttons('No live tests are scheduled right now. Teachers schedule them on testmandi.in; check back soon.', [['tm:browse', '📚 Browse tests']]);
+  await ctx.list('🔴 Live tests\nEveryone takes the test in the same window and gets ranked on one leaderboard. Buy before it starts; you\'ll get the link here when it opens.', 'See live tests', [{ title: 'Live tests', rows: [
+    ...tests.map(({ t, l }) => ({ id: `tm:card:${t.code}`, title: t.title, description: `${liveOpen(l, now) ? 'LIVE now' : fmtLive(l.start)} · ${priceTag(t.price)} · ${t.sellerName}` })),
+    { id: 'tm:browse', title: '⬅️ All categories' },
+  ] }]);
 }
 
 async function listTests(ctx, category, page) {
@@ -163,7 +187,9 @@ async function showTest(ctx, code) {
   await ctx.track('test_view', { code });
   if (owns(ctx.user, code)) {
     const done = await db.attempts.findOne({ product: 'testmandi', phone: ctx.phone, ref: code });
-    if (!done) return ctx.buttons(`You already own ${t.title}.`, [[`tm:start:${code}`, '▶️ Start test']]);
+    const ol = liveNext(t);
+    if (ol && !liveOpen(ol)) return ctx.buttons(`You own ${t.title}.\n${liveTag(ol)}: I'll send your link here when it opens. You can also practise it now; only the live window counts for the leaderboard.`, [[`tm:start:${code}`, '▶️ Practise now'], ['tm:live', '🔴 Live tests']]);
+    if (!done) return ctx.buttons(`You already own ${t.title}.${ol ? `\n${liveTag(ol)}: your attempt counts on the live leaderboard.` : ''}`, [[`tm:start:${code}`, '▶️ Start test']]);
   }
   const lines = [
     `📘 ${t.title}`,
@@ -171,6 +197,8 @@ async function showTest(ctx, code) {
     `${t.qids.length} questions · ${t.durationMin} min${t.language ? ' · ' + t.language : ''}`,
   ];
   if (t.attemptsCount >= 10) lines.push(`${fmtNum(t.attemptsCount)} students have taken it`);
+  const nl = liveNext(t);
+  if (nl) lines.push('', `${liveTag(nl)} · join within ${nl.windowMin} min of the start`, 'Buy now and the live link comes here the moment it opens.');
   if (t.price > 0) {
     lines.push('', `Price: ${t.anchor ? `${rupees(t.price)} (was ${rupees(t.anchor)})` : rupees(t.price)}`);
     const { discount, walletUse, pay } = priceFor(ctx, t.price);
@@ -285,8 +313,20 @@ export async function onPaid(ctx, order) {
 async function rewardBuyerReferrer(ctx, firstPurchase) {
   const u = ctx.user;
   if (!firstPurchase || !u.referredBy || u.refRewarded) return;
-  const reward = ctx.cfg.referral.buyerReward;
   await ctx.setUser({ refRewarded: true });
+  const inviter = await db.users.findOne({ product: 'testmandi', phone: u.referredBy });
+  if (inviter?.tmEmail) {
+    // Inviter is a TestMandi seller: same rule as testmandi.in, ₹200 straight to their payout balance
+    const amount = ctx.cfg.referral.sellerReferrerReward;
+    const ok = await creditSellerReferral({ email: inviter.tmEmail, amount, fromName: u.name || maskPhone(ctx.phone) }).catch((e) => { console.error('[testmandi] referral credit failed', e.message); return false; });
+    const ref = await db.users.updateOne({ product: 'testmandi', phone: inviter.phone }, { $inc: { referrals: 1, 'seller.referralEarnings': ok ? amount : 0 } });
+    if (ok && within24h(ref)) await send('testmandi', ref.phone, { type: 'text', text: `🎉 A student you invited just bought their first test.
+${rupees(amount)} added to your TestMandi payout balance.
+
+Invite more: send REFER` });
+    return;
+  }
+  const reward = ctx.cfg.referral.buyerReward;
   const ref = await db.users.updateOne({ product: 'testmandi', phone: u.referredBy }, { $inc: { wallet: reward, referrals: 1 } });
   if (ref && within24h(ref)) {
     await send('testmandi', ref.phone, { type: 'text', text: `🎉 Your friend just bought their first test on TestMandi.\n${rupees(reward)} added to your wallet. Wallet: ${rupees(ref.wallet)}\n\nInvite more friends: send REFER` });
@@ -295,7 +335,7 @@ async function rewardBuyerReferrer(ctx, firstPurchase) {
 
 async function notifySeller(sellerPhone, item, listPrice) {
   if (!sellerPhone) return;
-  const share = round2(listPrice * (item.sellerShare ?? 0.7));
+  const share = round2(listPrice * (item.sellerShare ?? (await import('../products.js')).products.testmandi.sellerShare));
   const today = istDate();
   const seller = await db.users.updateOne(
     { product: 'testmandi', phone: sellerPhone },
@@ -360,6 +400,10 @@ async function referBuyer(ctx) {
   const r = ctx.cfg.referral;
   const u = ctx.user;
   const link = waLink(config.wa.displayNumbers.testmandi, `Hi TREF ${u.refCode}`);
+  if (u.tmEmail) {
+    await ctx.say(`🎁 Refer & earn (seller)\n• Students you invite get ${rupees(r.friendDiscount)} off their first test\n• You get ${rupees(r.sellerReferrerReward)} in your TestMandi payout when they make their first purchase\n• Teachers who join with your code: ${rupees(r.sellerReferrerReward)} when they publish their first test\n\nYour code: ${u.tmReferralCode || '-'} · Students invited who bought: ${u.referrals || 0}\n\nForward the message below to students 👇`);
+    return ctx.say(`Practise my mock tests on WhatsApp with TestMandi, with rank and explanations. Use my link and get ${rupees(r.friendDiscount)} off your first test: ${link || 'message TestMandi and send TREF ' + u.refCode}`);
+  }
   await ctx.say(`🎁 Refer & earn\n• Your friend gets ${rupees(r.friendDiscount)} off their first test\n• You get ${rupees(r.buyerReward)} in your wallet when they buy\n• Wallet credit is used automatically on your next test\n\nFriends invited who bought: ${u.referrals || 0}\nWallet: ${rupees(u.wallet || 0)}\n\nForward the message below 👇`);
   await ctx.say(`I practise mock tests on WhatsApp with TestMandi: SSC, NEET, TNPSC and more, with rank and explanations. Use my link and get ${rupees(r.friendDiscount)} off your first test: ${link || 'message TestMandi and send TREF ' + u.refCode}`);
 }
@@ -381,6 +425,11 @@ export async function onAttempt(ctx, a) {
   const lines = [`📊 ${a.title}`, `Score: ${a.correct}/${a.total}`, `Rank: ${fmtNum(rank)} of ${fmtNum(total)} students`];
   if (total >= 10) lines.push(`You're in the top ${Math.max(1, Math.ceil((rank / total) * 100))}%`);
   if (a.weak.length) lines.push(`Weak areas: ${a.weak.slice(0, 3).join(', ')}`);
+  const session = (t?.live || []).find((l) => liveOpen(l, new Date(a.at).getTime()));
+  if (session && t.tmId) {
+    const ok = await recordLiveAttempt({ test: t, session, phone: ctx.phone, answersById: a.answers, correct: a.correct, total: a.total, timeSec: a.timeSec }).catch((e) => { console.error('[testmandi] live attempt failed', e.message); return false; });
+    if (ok) lines.push('', `🔴 Counted on the live leaderboard: ${ctx.cfg.webBase}`);
+  }
   lines.push('', 'Explanations for every question are on the result page.');
   await ctx.say(lines.join('\n'));
   await ctx.buttons(`How was this test by ${t.sellerName}?`, [[`tm:rate:${a.ref}:5`, '⭐⭐⭐⭐⭐ Great'], [`tm:rate:${a.ref}:4`, '⭐⭐⭐⭐ Good'], [`tm:rate:${a.ref}:2`, '⭐⭐ Could be better']]);
@@ -449,4 +498,29 @@ async function sellerStats(ctx) {
   const link = waLink(config.wa.displayNumbers.testmandi, `Hi SREF ${ctx.user.refCode}`);
   await ctx.say(`🤝 Invite other teachers to sell on TestMandi\nYou earn ${Math.round(r.sellerBonusPct * 100)}% of their sales for ${Math.round(r.sellerBonusDays / 30)} months. It comes from TestMandi's share, so they still keep ${Math.round(ctx.cfg.sellerShare * 100)}%.\nTeachers invited: ${invited}\n\nForward this to teachers 👇`);
   await ctx.say(`I sell my mock tests on TestMandi and students buy them right on WhatsApp. Teachers keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale. Join with my link: ${link || 'message TestMandi and send SREF ' + ctx.user.refCode}`);
+}
+
+// Cron: when a live window opens, send owners their link (in the 24h window; otherwise the TEMPLATE_LIVE_START template if set)
+export async function notifyLiveStarts(now = Date.now()) {
+  let sent = 0;
+  for (const t of await db.tests.find({ liveUntil: { $gte: now } })) {
+    for (const l of (t.live || []).filter((x) => liveOpen(x, now))) {
+      if (await db.events.findOne({ type: 'live_notified', ref: l.id })) continue;
+      await db.events.insertOne({ type: 'live_notified', product: 'testmandi', ref: l.id, at: new Date() });
+      const owners = await db.users.find({ product: 'testmandi', purchases: t.code });
+      const minsLeft = Math.max(1, Math.round((l.start + l.windowMin * 60e3 - now) / 60e3));
+      for (const u of owners) {
+        if (u.optedOut) continue;
+        if (within24h(u)) {
+          const url = await createMagicLink({ product: 'testmandi', phone: u.phone, kind: 'test', ref: t.code, title: t.title, qids: t.qids, durationMin: t.durationMin, ttlMin: minsLeft });
+          await send('testmandi', u.phone, { type: 'link', text: `🔴 LIVE now: ${t.title}\nJoin in the next ${minsLeft} min to be ranked on the live leaderboard.`, url, label: 'Join live test' });
+          sent++;
+        } else if (process.env.TEMPLATE_LIVE_START) {
+          await send('testmandi', u.phone, { type: 'template', name: process.env.TEMPLATE_LIVE_START, params: [t.title, String(minsLeft)] });
+          sent++;
+        }
+      }
+    }
+  }
+  return sent;
 }

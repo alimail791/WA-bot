@@ -83,6 +83,7 @@ export function createApp() {
     const attempt = await db.attempts.insertOne({
       product: row.product, phone: row.phone, name: user?.name || '', kind: row.kind, ref: row.ref, title: row.title,
       answers, answered: Object.keys(answers).length, correct: g.correct, total: g.total, bySubject: g.bySubject, weak: g.weak, wrongIds: g.wrongIds, at: new Date(),
+      timeSec: Math.max(0, Math.round((Date.now() - new Date(row.openedAt).getTime()) / 1000)),
     });
     try { await dispatchAttempt(attempt); } catch (e) { console.error('[attempt] follow-up failed', e); }
     return { status: 200, row, questions, attempt };
@@ -244,6 +245,7 @@ async function productOnSharedNumber(ev) {
   const kw = /\bTEST\s?MANDI\b/.test(upper) ? 'testmandi'
     : /\b(CLASS\s?COACH|TEACHER|TUTOR)\b/.test(upper) ? 'classcoach'
     : /\b(Y\s?NEET|NEET)\b/.test(upper) ? 'yneet' : null;
+  if (ev.replyId === 'pick:switch') await db.sessions.updateOne({ product: '_shared', phone: ev.from }, { $set: { pick: null } }, { upsert: true });
   const pick = kw || { 'pick:yneet': 'yneet', 'pick:testmandi': 'testmandi', 'pick:classcoach': 'classcoach' }[ev.replyId];
   if (pick) { await db.sessions.updateOne({ product: '_shared', phone: ev.from }, { $set: { pick } }, { upsert: true }); return pick; }
   const s = await db.sessions.findOne({ product: '_shared', phone: ev.from });

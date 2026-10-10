@@ -83,4 +83,5 @@ export function startCron() {
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);
+  cron.schedule('* * * * *', safe('live-start', async () => (await import('./flows/testmandi.js')).notifyLiveStarts()), tz);
 }

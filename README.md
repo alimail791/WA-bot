@@ -10,7 +10,7 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 | Who chats | NEET student | Test buyer (seller gets alerts) | Tutor; students join by link |
 | Entry | `Hi`, ads, `Hi REF CODE` from a friend | `TEST CODE` from a seller's share link | `Hi` (tutor), `JOIN CODE` (student) |
 | Free hook | Daily quiz, quick chapter practice, 1 free NEET mock, 1 chapter test a day | 5 free sample questions, free tests | 1-month free trial, 10 students |
-| Paid | ₹99 for 5 days · Monthly by class (₹300–₹600, till month end), same as app.yneet.in | Test price (seller keeps 70%) · bundles | Starter ₹499 · Growth ₹999 · Pro ₹1,999 (3 months) · NEET/JEE ₹599–₹1,999 a month or yearly, same as classcoach.in |
+| Paid | ₹99 for 5 days · Monthly by class (₹300–₹600, till month end), same as app.yneet.in | Test price (seller keeps 80%, same as testmandi.in) · bundles | Starter ₹499 · Growth ₹999 · Pro ₹1,999 (3 months) · NEET/JEE ₹599–₹1,999 a month or yearly, same as classcoach.in |
 | Brings people back | Streaks, 7 PM reminder, referral credits, Sunday parent report | Rank among buyers, rating, seller's pack and other tests | Results as they arrive, reminders, upgrade when class grows |
 
 ### Built-in sales tactics
@@ -35,7 +35,7 @@ Class selection (sets the monthly price), daily quiz with streaks, chapter pract
 |---|---|---|---|
 | YNeet | `Hi REF CODE` | 1 free premium test after first quiz | 1 free premium test, plus 1 free month when the friend buys Monthly |
 | TestMandi buyer | `Hi TREF CODE` | ₹10 off first test | ₹10 wallet credit when the friend buys (used automatically) |
-| TestMandi seller | `Hi SREF CODE` | Keeps the normal 70% | 5% of the invited seller's sales for 6 months, paid from TestMandi's share |
+| TestMandi seller | `Hi SREF CODE` | Keeps the normal 80% | 5% of the invited seller's sales for 6 months, paid from TestMandi's share |
 | ClassCoach | `Hi CREF CODE` | 1-month free trial | 3 months free for every 2 teachers who buy a plan |
 
 People get their link by sending `REFER` (TestMandi sellers: `SELLER`).
@@ -157,3 +157,10 @@ src/nudges.js         reminders on a schedule (India time)
 src/questions.js      picking, grading, CSV import
 src/providers/        WhatsApp Cloud API sender and the simulator
 ```
+
+## Live tests (TestMandi)
+Teachers schedule live tests on testmandi.in. The bot syncs them every 2 minutes, shows a "🔴 Live tests" row in Browse and the live time on the test card, sends every owner the join link when the window opens (template `TEMPLATE_LIVE_START` with params title, minutes left for people outside the 24-hour window), and puts WhatsApp attempts made inside the window on testmandi.in's live leaderboard.
+
+## Referral rewards that mirror testmandi.in
+- A TestMandi seller who invites a student (TREF link) gets ₹200 in their testmandi.in payout balance when the student's first WhatsApp purchase is paid.
+- A teacher who signs up with a seller's code earns that seller ₹200 when they publish their first test (handled by testmandi.in).

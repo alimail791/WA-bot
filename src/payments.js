@@ -36,7 +36,6 @@ export async function createOrder({ product, phone, item, title, amount, meta = 
         reference_id: order._id,
         customer: { contact: '+' + phone },
         notify: { sms: false, email: false },
-        upi_link: true,
         reminder_enable: false,
         callback_url: `${config.baseUrl}/paid/${order._id}`,
         callback_method: 'get',

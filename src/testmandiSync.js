@@ -37,7 +37,8 @@ const hashOf = (x) => createHash('sha1').update(JSON.stringify(x || [])).digest(
  */
 export async function syncFrom(source) {
   const started = Date.now();
-  const share = (source.sellerSharePercent ?? 70) / 100;
+  const share = (source.sellerSharePercent ?? 80) / 100;
+  try { (await import('./products.js')).products.testmandi.sellerShare = share; } catch {}
   const sellers = new Map(source.users.filter((u) => u.role === 'seller').map((u) => [u.email, u]));
   const seenIds = new Set();
   const codeById = new Map();
@@ -152,7 +153,52 @@ export async function syncFromTestMandi() {
     tm.collection('meta').findOne({ _id: 'settings' }),
   ]);
   const tests = tm.collection('tests').find({}).batchSize(20); // streamed, not loaded all at once
-  return syncFrom({ tests, bundles, users, sellerSharePercent: settings?.sellerSharePercent });
+  const result = await syncFrom({ tests, bundles, users, sellerSharePercent: settings?.sellerSharePercent });
+  const scheduled = await tm.collection('scheduledTests').find({ scheduledStart: { $gte: Date.now() - 24 * 3600e3 } }).toArray();
+  result.live = await syncLive(scheduled);
+  return result;
+}
+
+/**
+ * Live tests (testmandi.in "scheduled tests"): { id, testId, scheduledStart(ms), joinWindowMinutes }.
+ * Stored on the bot's test as live:[{ id, start, windowMin }] with liveUntil = end of the last join window.
+ */
+export async function syncLive(scheduled) {
+  const now = Date.now();
+  const byTest = new Map();
+  for (const s of scheduled || []) {
+    const windowMin = s.joinWindowMinutes || 30;
+    if (s.scheduledStart + windowMin * 60e3 < now) continue; // already over
+    const arr = byTest.get(s.testId) || [];
+    arr.push({ id: s.id, start: s.scheduledStart, windowMin });
+    byTest.set(s.testId, arr);
+  }
+  let n = 0;
+  for (const [tmId, live] of byTest) {
+    live.sort((a, b) => a.start - b.start);
+    const until = Math.max(...live.map((l) => l.start + l.windowMin * 60e3));
+    if (await db.tests.updateOne({ tmId }, { $set: { live, liveUntil: until } })) n += live.length;
+  }
+  // Clear sessions that were cancelled on testmandi.in
+  for (const t of await db.tests.find({ liveUntil: { $gte: now } })) {
+    if (!byTest.has(t.tmId)) await db.tests.updateOne({ code: t.code }, { $set: { live: [], liveUntil: 0 } });
+  }
+  return n;
+}
+
+// Put a WhatsApp attempt on testmandi.in's live leaderboard
+export async function recordLiveAttempt({ test, session, phone, answersById, correct, total, timeSec }) {
+  const answers = {};
+  (test.qids || []).forEach((qid, i) => { if (answersById?.[qid] !== undefined) answers[i] = answersById[qid]; });
+  const rec = {
+    id: 'a_wa_' + Date.now() + '_' + randomBytes(2).toString('hex'), testId: test.tmId, buyerEmail: `${phone}@whatsapp.testmandi.in`,
+    score: correct, total, answers, topicMap: {}, timeTakenSeconds: timeSec || 0, ts: Date.now(), ratingGiven: null, scheduledTestId: session.id, source: 'whatsapp',
+  };
+  if (saleSink) { saleSink('attempts', rec); return true; }
+  const tm = otherDb(tmDbName());
+  if (!tm || !enabled() || !test.tmId) return false;
+  await tm.collection('attempts').insertOne(rec);
+  return true;
 }
 
 let running = false;
@@ -164,6 +210,14 @@ export function startSync(everyMinutes = 15) {
   };
   run();
   setInterval(run, everyMinutes * 60e3).unref();
+  // Live-test schedule is small; check it every 2 minutes so new sessions show up quickly
+  setInterval(async () => {
+    if (running) return;
+    try {
+      const tm = otherDb(tmDbName());
+      if (tm) await syncLive(await tm.collection('scheduledTests').find({ scheduledStart: { $gte: Date.now() - 24 * 3600e3 } }).toArray());
+    } catch (e) { console.error('[testmandi-sync] live failed', e.message); }
+  }, 2 * 60e3).unref();
 }
 
 /**
@@ -172,6 +226,17 @@ export function startSync(everyMinutes = 15) {
  */
 let saleSink = null; // tests can capture sales here
 export function setSaleSink(fn) { saleSink = fn; }
+
+// testmandi.in's seller referral rule: flat bonus straight to the seller's payout balance
+export async function creditSellerReferral({ email, amount, fromName }) {
+  if (!email || !(amount > 0)) return false;
+  const entry = { id: 'srb_wa_' + Date.now(), ts: Date.now(), amount, type: 'buyer_purchase', fromName: fromName || 'WhatsApp buyer', source: 'whatsapp' };
+  if (saleSink) { saleSink('sellerReferral', { email, ...entry }); return true; }
+  const tm = otherDb(tmDbName());
+  if (!tm || !enabled()) return false;
+  const r = await tm.collection('users').updateOne({ email, role: 'seller' }, { $inc: { sellerReferralBonusTotal: amount }, $push: { sellerReferralHistory: entry } });
+  return r.matchedCount > 0;
+}
 
 export async function recordSaleInTestMandi({ item, phone, listPrice, paymentId }) {
   if (!item?.tmId || !(listPrice > 0)) return false;

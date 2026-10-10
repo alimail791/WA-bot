@@ -5,6 +5,9 @@ import { pickQuestions, getQuestions } from '../questions.js';
 import { istDate, fmtNum } from '../util.js';
 import { rupees } from '../products.js';
 
+// Shown only when all products share one WhatsApp number
+export const switchRows = () => (config.wa.sharedNumberId ? [{ id: 'pick:switch', title: '🔄 Switch product', description: 'YNeet · TestMandi · ClassCoach' }] : []);
+
 // ---- In-chat quiz --------------------------------------------------------
 // Session keeps { quiz: { qids, i, score, wrong:[], tag } }. Answer button ids: "ans:<i>:<option>"
 export async function startChatQuiz(ctx, { n, subject, topic, tag, qids }) {

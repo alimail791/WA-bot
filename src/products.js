@@ -28,11 +28,12 @@ export const products = {
     name: 'TestMandi',
     botName: 'TestMandi',
     webBase: 'https://testmandi.in',
-    sellerShare: 0.7, // seller's share of each sale
+    sellerShare: 0.8, // seller's share of each sale
     freeSample: 5, // free sample questions before buying
     pageSize: 8, // tests per page when browsing
     referral: {
       friendDiscount: 10, // ₹ off the invited buyer's first purchase
+      sellerReferrerReward: 200, // ₹ to a TestMandi seller's payout when a buyer they invited makes a first purchase (testmandi.in rule)
       buyerReward: 10, // ₹ wallet credit to the inviter when that friend's first purchase is paid
       sellerBonusPct: 0.05, // inviting seller earns 5% of an invited seller's sales (paid from the platform's share)
       sellerBonusDays: 180, // ...for this many days after the invited seller joins
