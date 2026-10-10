@@ -14,6 +14,7 @@ import { rupees } from '../products.js';
 import { code as newCode, waLink, DAY, istDate, maskPhone, refCodeFor } from '../util.js';
 import { within24h } from '../engine.js';
 import { offerFooter } from './common.js';
+import * as ccWeb from '../classcoachBridge.js';
 
 const active = (until) => until && new Date(until) > new Date();
 const onTrial = (u) => active(u.trialEndsAt) && !active(u.plan?.until);
@@ -22,6 +23,27 @@ const hasNeetPack = (u) => active(u.trialEndsAt) || (active(u.plan?.until) && u.
 // Active plan → its size; trial → 10; expired → frozen at the current class size
 const studentLimit = (u, cfg, current = 0) => (active(u.plan?.until) ? u.plan.students : active(u.trialEndsAt) ? cfg.trialStudents : current);
 const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
+// classcoach.in stores UTC times like "2026-10-30 00:45:51"
+const parseWebDate = (s) => (s ? new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : String(s).replace(' ', 'T') + 'Z') : null);
+
+// A tutor whose number matches a classcoach.in account uses that account's plan here (one account, one plan)
+async function syncFromWeb(ctx) {
+  if (!ccWeb.enabled()) return null;
+  let web;
+  try { web = await ccWeb.lookup(ctx.phone); } catch (e) { console.warn('[classcoach] web lookup failed', e.message); return null; }
+  if (!web) { if (ctx.user.ccLinked) await ctx.setUser({ ccLinked: null }); return null; }
+  const patch = { ccLinked: { email: web.email, name: web.name, batches: web.batches.length, students: web.students } };
+  const until = parseWebDate(web.planExpiresAt) || new Date(Date.now() + 3650 * DAY);
+  if (web.plan === 'trial' || web.plan === 'free') {
+    patch.trialEndsAt = web.planActive ? until : new Date(Date.now() - 1000);
+  } else if (ctx.cfg.plans[web.plan]) {
+    patch.plan = { id: web.plan, students: web.maxStudents, track: web.track, until };
+  }
+  if (!ctx.user.name && web.name) patch.name = web.name;
+  await ctx.setUser(patch);
+  return web;
+}
+
 const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 const trialDaysLeft = (u) => Math.max(0, Math.ceil((new Date(u.trialEndsAt) - Date.now()) / DAY));
 const isPackSubject = (s) => /^(NEET|JEE)/i.test(s);
@@ -41,6 +63,7 @@ export async function handle(ctx, input) {
     await ctx.setUser({ role: 'tutor', trialEndsAt: new Date(Date.now() + ctx.cfg.trialDays * DAY) });
   }
   if (!ctx.user.refCode) await ctx.setUser({ refCode: refCodeFor('classcoach', ctx.phone) });
+  await syncFromWeb(ctx);
   const cref = upper.match(/\bCREF\s+([A-Z0-9]{6})\b/);
   if (cref) await joinWithInvite(ctx, cref[1]);
   if (state === 'await_topic' && !replyId) return makeQuiz(ctx, ctx.session.data.subject, text);
@@ -84,9 +107,12 @@ async function tutorMenu(ctx) {
   const name = u.name ? u.name.split(' ')[0] : '';
   const lines = [];
   if (ctx.isNew) {
-    lines.push(`Welcome to ClassCoach${name ? ', ' + name : ''}! 👋`, 'Make a quiz in seconds, send one link to your class group, and get every student\'s marks here. No app needed.', '', `🎁 Your 1-month free trial is on: up to ${ctx.cfg.trialStudents} students, reminders and the 3,600-question NEET bank.`);
+    lines.push(`Welcome to ClassCoach${name ? ', ' + name : ''}! 👋`, 'Make a quiz in seconds, send one link to your class group, and get every student\'s marks here. No app needed.');
+    if (u.ccLinked) lines.push('', `🔗 Linked to your classcoach.in account (${u.ccLinked.email}). Your plan works here too.`);
+    else lines.push('', `🎁 Your 1-month free trial is on: up to ${ctx.cfg.trialStudents} students, reminders and the 3,600-question NEET bank.`, ccWeb.enabled() ? 'Already on classcoach.in? Use this WhatsApp number as the phone in your classcoach.in Settings and your plan links automatically.' : '');
   } else {
     lines.push(`Hi${name ? ' ' + name : ''}! 👋`);
+    if (u.ccLinked) lines.push(`🔗 Linked to your classcoach.in account (${u.ccLinked.email})`);
     if (onTrial(u)) lines.push(`Free trial: ${trialDaysLeft(u)} day${trialDaysLeft(u) === 1 ? '' : 's'} left.`);
     else if (active(u.plan?.until)) lines.push(`${ctx.cfg.plans[u.plan.id]?.title || 'Plan'} active till ${fmtDate(u.plan.until)}.`);
     else lines.push('⚠️ Your plan has ended: existing students stay, new students can\'t join. Send PLANS to renew.');
@@ -315,7 +341,19 @@ export async function onPaid(ctx, order) {
   const from = active(ctx.user.plan?.until) ? new Date(ctx.user.plan.until) : new Date();
   const until = addMonths(from, plan.months);
   await ctx.setUser({ plan: { id: plan.id, students: plan.students, track: plan.track, until } });
-  await ctx.say(`✅ Payment received: ${rupees(order.amount)}\n${plan.title} is active till ${fmtDate(until)}. Up to ${plan.students} students${plan.track === 'neet_jee' ? ', with the NEET/JEE question bank' : ''}. Thank you! 🙏`);
+  let webNote = '';
+  if (ccWeb.enabled()) {
+    try {
+      const web = await ccWeb.applyPlan({ phone: ctx.phone, planId: plan.id, paymentId: order.paymentId || String(order._id), amount: order.amount });
+      if (web) {
+        const webUntil = parseWebDate(web.planExpiresAt);
+        if (webUntil) await ctx.setUser({ plan: { id: plan.id, students: web.maxStudents, track: plan.track, until: webUntil } });
+        webNote = `\nYour classcoach.in account (${web.email}) is upgraded too.`;
+      } else webNote = '\nTo use this plan on classcoach.in too, sign up there with this WhatsApp number.';
+    } catch (e) { console.error('[classcoach] could not apply plan on classcoach.in', e.message); }
+  }
+  const shown = ctx.user.plan?.until || until;
+  await ctx.say(`✅ Payment received: ${rupees(order.amount)}\n${plan.title} is active till ${fmtDate(shown)}. Up to ${plan.students} students${plan.track === 'neet_jee' ? ', with the NEET/JEE question bank' : ''}. Thank you! 🙏${webNote}`);
   if (!ctx.user.firstPlanBought) {
     await ctx.setUser({ firstPlanBought: true });
     if (ctx.user.referredBy) await rewardInviter(ctx);

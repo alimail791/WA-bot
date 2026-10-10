@@ -580,3 +580,31 @@ test('Website buttons ("Hi YNeet", "Hi TestMandi", "Hi ClassCoach") open the rig
   await hook('919000000400', 'Hi'); await wait();
   assert.equal(fresh('yneet', '919000000400').length > 0, true, 'choice is remembered');
 });
+
+test('ClassCoach link: classcoach.in plan is used on WhatsApp; WhatsApp purchase is applied on classcoach.in', async () => {
+  const cc = await import('../src/classcoachBridge.js');
+  const applied = [];
+  const webTeacher = { id: 7, name: 'Lakshmi', email: 'lak@x.in', plan: 'growth', track: 'general', maxStudents: 50, planExpiresAt: '2027-01-15 10:00:00', planActive: true, students: 31, batches: [{ id: 1 }, { id: 2 }] };
+  cc.setImpl({
+    lookup: async (phone) => (phone === '919000000500' ? webTeacher : null),
+    applyPlan: async (a) => { applied.push(a); return a.phone === '919000000500' ? { ...webTeacher, plan: a.planId, maxStudents: 100, planExpiresAt: '2027-04-15 10:00:00' } : null; },
+  });
+  try {
+    const P = 'classcoach';
+    let m = await say(P, '919000000500', 'Hi');
+    assert.match(textOf(m), /Linked to your classcoach\.in account \(lak@x\.in\)/);
+    const u = await db.users.findOne({ product: P, phone: '919000000500' });
+    assert.equal(u.plan.id, 'growth');
+    assert.equal(u.plan.students, 50);
+    m = await say(P, '919000000500', '', 'cc:buy:pro');
+    await payLink(lastLink(m).url);
+    assert.equal(applied.length, 1);
+    assert.equal(applied[0].planId, 'pro');
+    m = fresh(P, '919000000500');
+    assert.match(textOf(m), /classcoach\.in account \(lak@x\.in\) is upgraded too/);
+    assert.match(textOf(m), /active till 15 Apr 2027/);
+    // Not on classcoach.in: told how to link
+    m = await say(P, '919000000501', 'Hi');
+    assert.match(textOf(m), /Already on classcoach\.in\?/);
+  } finally { cc.setImpl(null); }
+});
