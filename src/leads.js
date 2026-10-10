@@ -110,35 +110,46 @@ export async function importLeads(text, { defaultType = '', source = 'import', t
     rows.shift();
   }
   const out = { added: 0, updated: 0, skipped: 0, invalid: 0, existing: 0, bySegment: {} };
-  const seen = new Set();
+  const seen = new Map();
   for (const r of rows) {
     const get = (k) => (idx[k] === undefined ? '' : r[idx[k]] || '');
     let phone = cleanPhone(get('phone'));
     if (!phone) phone = r.map(cleanPhone).find(Boolean) || null; // phone in an unexpected column
     if (!phone) { out.invalid++; continue; }
     if (seen.has(phone)) { out.skipped++; continue; }
-    seen.add(phone);
     const name = get('name').slice(0, 60), org = get('org').slice(0, 80), city = get('city').slice(0, 40), typeText = get('type');
     const segment = detectSegment(typeText) || detectSegment(defaultType) || detectSegment(org, name) || 'institute';
-    const existingLead = await db.leads.findOne({ phone });
-    if (existingLead) {
+    seen.set(phone, { phone, name, org, city, typeText: typeText.slice(0, 40), segment });
+  }
+  // Look up existing leads and users in bulk (thousands of rows import in seconds)
+  const phones = [...seen.keys()];
+  const existingLeads = new Map(), customers = new Set();
+  for (let i = 0; i < phones.length; i += 500) {
+    const chunk = phones.slice(i, i + 500);
+    for (const l of await db.leads.find({ phone: { $in: chunk } }, { projection: { phone: 1, name: 1, org: 1, city: 1 } })) existingLeads.set(l.phone, l);
+    for (const u of await db.users.find({ phone: { $in: chunk } }, { projection: { phone: 1 } })) customers.add(u.phone);
+  }
+  const fresh = [];
+  for (const c of seen.values()) {
+    const old = existingLeads.get(c.phone);
+    if (old) {
       const patch = {};
-      if (!existingLead.name && name) patch.name = name;
-      if (!existingLead.org && org) patch.org = org;
-      if (!existingLead.city && city) patch.city = city;
-      if (Object.keys(patch).length) { await db.leads.updateOne({ phone }, { $set: patch }); out.updated++; } else out.skipped++;
+      if (!old.name && c.name) patch.name = c.name;
+      if (!old.org && c.org) patch.org = c.org;
+      if (!old.city && c.city) patch.city = c.city;
+      if (Object.keys(patch).length) { await db.leads.updateOne({ phone: c.phone }, { $set: patch }); out.updated++; } else out.skipped++;
       continue;
     }
-    const customer = await db.users.findOne({ phone });
-    const stage = customer ? 'existing' : 'new';
+    const customer = customers.has(c.phone);
     if (customer) out.existing++;
-    await db.leads.insertOne({
-      phone, name, org, city, typeText: typeText.slice(0, 40), segment, product: SEGMENTS[segment].product, stage,
+    fresh.push({
+      ...c, product: SEGMENTS[c.segment].product, stage: customer ? 'existing' : 'new',
       step: 0, sent: 0, source, tag, notes: [], owner: '', hot: false, createdAt: new Date(), stageAt: new Date(),
     });
     out.added++;
-    out.bySegment[segment] = (out.bySegment[segment] || 0) + 1;
+    out.bySegment[c.segment] = (out.bySegment[c.segment] || 0) + 1;
   }
+  for (let i = 0; i < fresh.length; i += 500) await db.leads.insertMany(fresh.slice(i, i + 500));
   return out;
 }
 

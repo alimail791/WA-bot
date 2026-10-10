@@ -74,7 +74,10 @@ class MemoryCollection {
 class MongoCollection {
   constructor(c) { this.c = c; }
   async insertOne(doc) { const d = { _id: randomUUID(), ...doc }; await this.c.insertOne(d); return d; }
-  async insertMany(docs) { if (docs.length) await this.c.insertMany(docs.map((d) => ({ _id: randomUUID(), ...d }))); }
+  async insertMany(docs) {
+    if (!docs.length) return;
+    try { await this.c.insertMany(docs.map((d) => ({ _id: randomUUID(), ...d })), { ordered: false }); } catch (e) { if (e.code !== 11000 && !/E11000/.test(e.message)) throw e; }
+  }
   async findOne(f = {}) { return this.c.findOne(f); }
   async find(f = {}, { sort, limit, skip, projection } = {}) {
     let q = this.c.find(f, projection ? { projection } : {});

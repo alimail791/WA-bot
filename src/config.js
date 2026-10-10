@@ -34,6 +34,7 @@ export const config = {
       classcoach: env.WA_DISPLAY_CLASSCOACH || env.WA_DISPLAY_SHARED || '919443424064',
     },
     businessName: env.WA_BUSINESS_NAME || 'Raise Academy',
+    wabaId: env.WA_WABA_ID || '288659347654071', // WhatsApp Business Account ID (for the connection check)
   },
 
   // AiSensy Campaign API (template messages only)

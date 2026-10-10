@@ -243,3 +243,35 @@ test('Leads console: needs the key; summary, list, import, notes and test send w
   const camp = await post('/admin/leads/campaign', { running: false, dailyCap: 300 });
   assert.equal(camp.dailyCap, 300);
 });
+
+test('Big import: 5,000 rows go in one request, quickly', async () => {
+  const rows = ['Mobile,Name,Institute,Type,City'];
+  for (let i = 0; i < 5000; i++) rows.push(`9${String(700000000 + i)},Name ${i},Inst ${i},${i % 2 ? 'tuition' : 'school'},City`);
+  const t0 = Date.now();
+  const r = await leads.importLeads(rows.join('\n'));
+  assert.equal(r.added, 5000);
+  assert.ok(Date.now() - t0 < 15000);
+  const again = await leads.importLeads(rows.slice(0, 101).join('\n'));
+  assert.equal(again.added, 0);
+  assert.equal(again.skipped, 100);
+});
+
+test('WhatsApp check page explains a missing app subscription and can reconnect', async () => {
+  const realFetch = globalThis.fetch;
+  let posted = false;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('http://127.0.0.1')) return realFetch(url, opts);
+    if (u.includes('/subscribed_apps') && opts.method === 'POST') { posted = true; return new Response('{"success":true}'); }
+    if (u.includes('/subscribed_apps')) return new Response(JSON.stringify({ data: posted ? [{ whatsapp_business_api_data: { name: 'wa-bot' } }] : [] }));
+    return new Response(JSON.stringify({ display_phone_number: '+91 94434 24064', verified_name: 'Raise Academy', status: 'CONNECTED', quality_rating: 'GREEN', is_on_biz_app: true }));
+  };
+  try {
+    let html = await (await realFetch(`${base}/admin/whatsapp?key=${config.adminKey}`)).text();
+    assert.match(html, /Bot app is NOT connected/);
+    html = await (await realFetch(`${base}/admin/whatsapp?key=${config.adminKey}&fix=1`)).text();
+    assert.ok(posted);
+    assert.match(html, /Reconnected/);
+    assert.match(html, /Bot app connected to your WhatsApp account \(wa-bot\)/);
+  } finally { globalThis.fetch = realFetch; }
+});
