@@ -203,7 +203,7 @@ test('Safety: delivery failures and too many stops pause the campaign', async ()
 
 test('Paid lead becomes a customer; onboarding nudges a trial tutor with no quiz yet', async () => {
   const ph = '919876543210'; // tutor who saw the demo
-  await db.leads.updateOne({ phone: ph }, { $set: { demoAt: new Date(Date.now() - 1.2 * DAY) } });
+  await db.leads.updateOne({ phone: ph }, { $set: { demoAt: new Date(at11() - 1.2 * DAY) } });
   await db.classes.deleteMany({ tutorPhone: ph });
   fresh(ph);
   await db.users.updateOne({ product: 'classcoach', phone: ph }, { $set: { lastInboundAt: new Date() } });

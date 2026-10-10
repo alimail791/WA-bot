@@ -12,8 +12,8 @@ import * as payCheck from './payCheck.js';
 import * as sim from './providers/sim.js';
 import { openMagicLink, consumeMagicLink } from './magic.js';
 import { getQuestions, grade, csvToQuestions } from './questions.js';
-import { markPaid, razorpayWebhook } from './payments.js';
-import { testPage, resultPage, messagePage, devPayPage } from './pages.js';
+import { markPaid, razorpayWebhook, verifyCheckout, syncOrder } from './payments.js';
+import { testPage, resultPage, messagePage, devPayPage, payPage } from './pages.js';
 import { hmac, safeEqual, maskPhone, waLink, sign, verify } from './util.js';
 import { seed } from './seed.js';
 
@@ -151,8 +151,32 @@ export function createApp() {
   });
 
   app.get('/paid/:id', async (req, res) => {
+    let order = await db.orders.findOne({ _id: req.params.id });
+    if (order) order = (await syncOrder(order).catch(() => order)) || order;
+    const text = !order ? 'Order not found.' : order.status === 'paid' ? '✅ Payment received. Go back to WhatsApp, your purchase is there.' : 'Thank you! Your payment is being confirmed. Go back to WhatsApp, your purchase will be there in a moment.';
+    res.send(messagePage(order?.product, 'Payment', text, backToChat(order?.product)));
+  });
+
+  // Our payment page (UPI apps first on phones, QR on computers)
+  app.get('/pay/:id', async (req, res) => {
     const order = await db.orders.findOne({ _id: req.params.id });
-    res.send(messagePage(order?.product, 'Payment', order ? 'Thank you! Your payment is being confirmed. Go back to WhatsApp — your purchase will be there in a moment.' : 'Order not found.', backToChat(order?.product)));
+    if (!order) return res.status(404).send(messagePage('yneet', 'Payment', 'This payment link is not valid. Ask for a new one in WhatsApp.', backToChat('yneet')));
+    if (order.status === 'paid') return res.send(messagePage(order.product, 'Paid', '✅ This order is already paid. Your purchase is in WhatsApp.', backToChat(order.product)));
+    if (!order.rzpOrderId) return order.rzpLink ? res.redirect(order.rzpLink) : res.status(410).send(messagePage(order.product, 'Payment', 'Payments are not available right now. Reply PAY in WhatsApp and we will help you.', backToChat(order.product)));
+    const ua = String(req.get('user-agent') || '');
+    const mobile = /Android|iPhone|iPad|Mobile/i.test(ua);
+    const inApp = /WhatsApp|FBAN|FBAV|Instagram|; wv\)/i.test(ua);
+    res.set('Cache-Control', 'no-store');
+    res.send(payPage(order, { keyId: config.razorpay.keyId, mobile, inApp, waUrl: backToChat(order.product), name: config.wa.businessName }));
+  });
+  app.post('/pay/:id/verify', async (req, res) => {
+    try { res.json(await verifyCheckout(req.params.id, req.body || {})); } catch (e) { console.error('[pay] verify', e); res.json({ ok: false }); }
+  });
+  app.get('/pay/:id/status', async (req, res) => {
+    let order = await db.orders.findOne({ _id: req.params.id });
+    if (order && order.status !== 'paid') order = (await syncOrder(order).catch(() => order)) || order;
+    res.set('Cache-Control', 'no-store');
+    res.json({ paid: order?.status === 'paid' });
   });
 
   if (!config.razorpay.keyId && config.provider === 'sim') {

@@ -16,6 +16,8 @@ export async function nudgeAbandonedOrders(now = Date.now()) {
   for (const o of orders) {
     const u = await db.users.findOne({ product: o.product, phone: o.phone });
     await db.orders.updateOne({ _id: o._id }, { $set: { nudged: true } });
+    const synced = await (await import('./payments.js')).syncOrder(o).catch(() => o);
+    if (synced?.status === 'paid') continue;
     if (!u || u.optedOut || !within24h(u)) continue;
     const paid = await db.orders.count({ product: o.product, phone: o.phone, status: 'paid', createdAt: { $gte: o.createdAt } });
     if (paid) continue;
@@ -101,6 +103,7 @@ export function startCron() {
   const safe = (name, fn) => async () => { try { await fn(); } catch (e) { console.error(`[cron] ${name} failed`, e); } };
   cron.schedule('*/10 * * * *', safe('abandoned', nudgeAbandonedOrders), tz);
   cron.schedule('7 * * * *', safe('unpaid-next-day', nudgeUnpaidNextDay), tz);
+  cron.schedule('*/3 * * * *', safe('payment-sync', async () => (await import('./payments.js')).syncRecentOrders()), tz);
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);

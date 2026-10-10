@@ -94,3 +94,65 @@ export function devPayPage(order) {
 ${order.status === 'paid' ? '<div class="card ok">Already paid ✓</div>' : `<form method="post"><button>Simulate successful payment</button></form>`}
 </main>`);
 }
+
+// Our own payment page: UPI apps first on phones, UPI QR first on computers (Razorpay Checkout underneath)
+export function payPage(order, { keyId, mobile, inApp, waUrl, name = 'Raise Academy' }) {
+  const product = products[order.product]?.name || name;
+  const amount = Number(order.amount);
+  const opts = {
+    key: keyId, order_id: order.rzpOrderId, amount: Math.round(amount * 100), currency: 'INR', name,
+    description: String(order.title).slice(0, 250), prefill: { contact: '+' + order.phone },
+    readonly: { contact: true }, notes: { order_id: String(order._id) }, theme: { color: BRAND[order.product] || '#2b3a8f' },
+    retry: { enabled: true },
+    config: { display: {
+      blocks: { upi: { name: mobile ? 'Pay with your UPI app' : 'Scan & pay with UPI', instruments: [{ method: 'upi', flows: mobile ? ['intent', 'collect'] : ['qr', 'collect'] }] } },
+      sequence: ['block.upi'], preferences: { show_default_blocks: true },
+    } },
+  };
+  return layout(order.product, `Pay ₹${amount} · ${product}`, `
+<header><b>${esc(name)}</b><span class="muted" style="color:#fff;opacity:.85">🔒 Secure payment</span></header>
+<main>
+  <div class="card" id="box">
+    <div class="muted">${esc(product)}</div>
+    <div style="font-weight:600;margin:4px 0 10px">${esc(order.title)}</div>
+    <div class="score">₹${amount.toLocaleString('en-IN')}</div>
+    <div class="muted" style="margin-bottom:14px">${mobile ? 'Pay in seconds with GPay, PhonePe, Paytm or any UPI app.' : 'Scan the QR code with any UPI app on your phone.'}</div>
+    <button id="pay">${mobile ? 'Pay with GPay / PhonePe / Paytm' : 'Show UPI QR code'}</button>
+    <div class="muted" style="margin-top:10px;text-align:center">Cards, net banking and wallets also accepted</div>
+  </div>
+  ${inApp ? `<div class="card" style="font-size:14px"><b>Opened inside WhatsApp?</b> If your UPI app doesn't open, tap <b>⋮</b> at the top right → <b>Open in Chrome</b> (or browser), then pay there.<button class="btn ghost" id="copy" style="margin-top:10px">Copy payment link</button></div>` : ''}
+  <div id="status" class="muted" style="text-align:center"></div>
+  ${order.rzpLink ? `<a class="btn ghost" href="${esc(order.rzpLink)}">Other ways to pay</a>` : ''}
+  <div class="muted" style="text-align:center">Payments are processed by Razorpay. ${esc(name)} never sees your bank or card details.</div>
+</main>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+const OPTS = ${JSON.stringify(opts).replace(/</g, '\\u003c')};
+const ID = ${JSON.stringify(String(order._id))};
+const WA = ${JSON.stringify(waUrl || '')};
+let done = false;
+function paid() {
+  if (done) return; done = true;
+  document.getElementById('box').innerHTML = '<div class="score" style="color:var(--good)">✅ Paid</div><p>Thank you! Your purchase is on its way to WhatsApp.</p>' + (WA ? '<a class="btn" href="' + WA + '">Back to WhatsApp</a>' : '');
+  document.getElementById('status').textContent = '';
+}
+function open() {
+  if (!window.Razorpay) { document.getElementById('status').textContent = 'Loading… if this stays, use "Other ways to pay" below.'; return; }
+  const rz = new Razorpay(Object.assign({}, OPTS, {
+    handler: async (r) => {
+      document.getElementById('status').textContent = 'Confirming your payment…';
+      try { const v = await fetch('/pay/' + ID + '/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) }).then((x) => x.json()); if (v.ok) paid(); } catch (e) {}
+    },
+    modal: { ondismiss: () => { document.getElementById('status').textContent = 'Payment not finished. Tap the button to try again.'; } },
+  }));
+  rz.on('payment.failed', (e) => { document.getElementById('status').textContent = 'Payment failed: ' + ((e.error && e.error.description) || 'please try again') + '.'; });
+  rz.open();
+}
+document.getElementById('pay').onclick = open;
+const c = document.getElementById('copy');
+if (c) c.onclick = async () => { try { await navigator.clipboard.writeText(location.href); c.textContent = 'Copied ✓ paste it in Chrome'; } catch (e) { c.textContent = location.href; } };
+// Paid in a UPI app and came back? Check every few seconds.
+setInterval(async () => { if (done || document.hidden) return; try { const s = await fetch('/pay/' + ID + '/status').then((x) => x.json()); if (s.paid) paid(); } catch (e) {} }, 4000);
+window.addEventListener('load', () => setTimeout(open, 400));
+</script>`);
+}
