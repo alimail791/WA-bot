@@ -40,8 +40,10 @@ export async function check({ fix = false } = {}) {
     const e = dbg.error || {};
     add(false, 'Meta blocked even the token check', `${e.message || ''} (code ${e.code ?? '?'}${e.error_subcode ? ', subcode ' + e.error_subcode : ''}${e.type ? ', ' + e.type : ''})${e.error_user_msg ? ' · ' + e.error_user_msg : ''}${e.fbtrace_id ? ' · trace ' + e.fbtrace_id : ''}`);
   }
+  if (dbg.ok && !dbg.data?.data) add(false, 'Token check returned no details', JSON.stringify(dbg.data).slice(0, 300));
   const me = await graph('me?fields=id,name');
   if (me.ok) add(true, `Token belongs to: ${me.data.name || ''} (${me.data.id})`, '');
+  else add(false, 'Meta blocked reading the token owner', `${me.error.message || ''} (code ${me.error.code ?? '?'}${me.error.error_subcode ? ', subcode ' + me.error.error_subcode : ''}${me.error.type ? ', ' + me.error.type : ''})${me.error.fbtrace_id ? ' · trace ' + me.error.fbtrace_id : ''}`);
   const phone = await graph(`${config.wa.sharedNumberId}?fields=display_phone_number,verified_name,status,quality_rating,messaging_limit_tier,platform_type,is_on_biz_app,code_verification_status,name_status,webhook_configuration`);
   if (!phone.ok) {
     const e = phone.error;
