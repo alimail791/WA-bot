@@ -26,12 +26,28 @@ export async function check({ fix = false } = {}) {
     const r = await graph(`${config.wa.wabaId}/subscribed_apps`, { method: 'POST' });
     out.fixed = r.ok ? 'Reconnected: your WhatsApp account will now send messages to the bot again.' : `Reconnect failed: ${r.error.message}`;
   }
+  // What Meta says about the token itself: which app, valid or not, permissions, expiry
+  const dbg = await graph(`debug_token?input_token=${encodeURIComponent(config.wa.token)}`);
+  if (dbg.ok && dbg.data?.data) {
+    const d = dbg.data.data;
+    const exp = d.expires_at ? (d.expires_at === 0 ? 'never expires' : `expires ${new Date(d.expires_at * 1000).toLocaleDateString('en-IN')}`) : 'never expires';
+    const scopes = d.scopes || [];
+    const need = ['whatsapp_business_messaging', 'whatsapp_business_management'].filter((x) => !scopes.includes(x));
+    add(!!d.is_valid, d.is_valid ? `Token is valid · app "${d.application || d.app_id}" (${d.app_id}) · ${exp}` : `Token is NOT valid · app "${d.application || d.app_id}" (${d.app_id})`,
+      [d.error?.message, need.length ? `Missing permissions: ${need.join(', ')}` : `Permissions OK (${scopes.filter((x) => x.startsWith('whatsapp')).join(', ')})`, d.type ? `Token type: ${d.type}` : ''].filter(Boolean).join(' · '));
+    out.appId = d.app_id;
+  } else if (!dbg.ok) {
+    const e = dbg.error || {};
+    add(false, 'Meta blocked even the token check', `${e.message || ''} (code ${e.code ?? '?'}${e.error_subcode ? ', subcode ' + e.error_subcode : ''}${e.type ? ', ' + e.type : ''})${e.error_user_msg ? ' · ' + e.error_user_msg : ''}${e.fbtrace_id ? ' · trace ' + e.fbtrace_id : ''}`);
+  }
+  const me = await graph('me?fields=id,name');
+  if (me.ok) add(true, `Token belongs to: ${me.data.name || ''} (${me.data.id})`, '');
   const phone = await graph(`${config.wa.sharedNumberId}?fields=display_phone_number,verified_name,status,quality_rating,messaging_limit_tier,platform_type,is_on_biz_app,code_verification_status,name_status,webhook_configuration`);
   if (!phone.ok) {
     const e = phone.error;
     const expired = e.code === 190 || /expired|session|access token/i.test(e.message || '');
     add(false, expired ? 'WhatsApp access token stopped working' : 'Could not read your WhatsApp number from Meta',
-      expired ? 'The WA_TOKEN in Railway has expired or was revoked. Create a permanent token: Meta Business Settings → Users → System users → your system user → Generate new token (no expiry, permissions whatsapp_business_messaging and whatsapp_business_management), then paste it into WA_TOKEN in Railway.' : `${e.message || ''} (code ${e.code || '?'})`);
+      expired ? 'The WA_TOKEN in Railway has expired or was revoked. Create a permanent token: Meta Business Settings → Users → System users → your system user → Generate new token (no expiry, permissions whatsapp_business_messaging and whatsapp_business_management), then paste it into WA_TOKEN in Railway.' : `${e.message || ''} (code ${e.code ?? '?'}${e.error_subcode ? ', subcode ' + e.error_subcode : ''}${e.type ? ', ' + e.type : ''})${e.error_user_msg ? ' · ' + e.error_user_msg : ''}`);
   } else {
     const p = phone.data;
     add(true, 'Access token works', `Number ${p.display_phone_number || ''} · ${p.verified_name || ''}`);
