@@ -285,6 +285,12 @@ export async function intercept(ev, { setPick } = {}) {
     await handleLeadReply(phone, ev.replyId, { setPick, name: ev.name });
     return true;
   }
+  if (/^DELETE (MY )?DATA$/.test(upper)) {
+    await log('delete_request', phone);
+    await send('yneet', phone, { type: 'text', text: 'Got it ✅ Your request to delete your data is recorded. We will delete your records within 7 days and confirm here.' });
+    await alertOwner(`🗑️ Data deletion request from +${phone}. Delete within 7 days and confirm to them.`, { phone });
+    return true;
+  }
   if (HELP_WORDS.test(upper)) { await handover(phone, `typed "${typed}"`); return true; }
   if (upper === 'STOP' || upper === 'UNSUBSCRIBE') {
     if (await db.leads.findOne({ phone })) { await handleLeadReply(phone, 'lead:stop', { setPick, name: ev.name }); return true; }
