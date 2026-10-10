@@ -565,3 +565,18 @@ test('TestMandi category list pages when there are many exams', async () => {
   assert.match(textOf(m), /More exams \(page 2\)/);
   await db.tests.deleteMany({ code: { $in: Array.from({ length: 15 }, (_, i) => `CAT-${i}`) } });
 });
+
+test('Website buttons ("Hi YNeet", "Hi TestMandi", "Hi ClassCoach") open the right product on the shared number', async () => {
+  config.wa.sharedNumberId = 'SHARED1';
+  const hook = (from, body) => fetch(`${base}/webhooks/whatsapp`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: 'SHARED1' }, contacts: [{ wa_id: from, profile: { name: 'Web' } }], messages: [{ id: 'w' + Math.random(), from, type: 'text', text: { body } }] } }] }] }) });
+  const wait = () => new Promise((r) => setTimeout(r, 80));
+  await hook('919000000400', 'Hi YNeet'); await wait();
+  assert.match(textOf(fresh('yneet', '919000000400')), /Which class are you in/);
+  await hook('919000000401', 'Hi TestMandi'); await wait();
+  assert.match(textOf(fresh('testmandi', '919000000401')), /Welcome to TestMandi/);
+  await hook('919000000402', 'Hi ClassCoach'); await wait();
+  assert.match(textOf(fresh('classcoach', '919000000402')), /Welcome to ClassCoach/);
+  await hook('919000000400', 'Hi'); await wait();
+  assert.equal(fresh('yneet', '919000000400').length > 0, true, 'choice is remembered');
+});

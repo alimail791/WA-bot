@@ -21,6 +21,15 @@ async function q(sql, params) {
   return (await pool.query(sql, params)).rows;
 }
 
+// Start-up check: proves the link works and shows how many students it can see
+export async function check() {
+  if (impl || !process.env.YNEET_DATABASE_URL) return null;
+  const [r] = await q(`SELECT count(*)::int AS students,
+    count(*) FILTER (WHERE coalesce(phone, '') <> '')::int AS "withPhone" FROM users`);
+  const [s] = await q(`SELECT count(*)::int AS active FROM subscriptions WHERE status = 'active' AND "endDate" > now()`);
+  return { ...r, activeSubscriptions: s.active };
+}
+
 const last10 = (phone) => String(phone).replace(/\D/g, '').slice(-10);
 
 // Find the YNeet student for a WhatsApp number, with their class and subscription

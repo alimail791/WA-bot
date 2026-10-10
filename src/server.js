@@ -5,6 +5,7 @@ import { seed } from './seed.js';
 import { startCron } from './nudges.js';
 import * as tmSync from './testmandiSync.js';
 import { ensureNeetBank } from './bank.js';
+import * as yneetBridge from './yneetBridge.js';
 
 await connect();
 if (config.store === 'memory' || process.env.SEED_SAMPLE === 'true') {
@@ -12,6 +13,11 @@ if (config.store === 'memory' || process.env.SEED_SAMPLE === 'true') {
   if (await seed({ withTests })) console.log(withTests ? 'Loaded sample questions and tests' : 'Loaded sample questions');
 }
 try { await ensureNeetBank(); } catch (e) { console.error('[bank] could not load NEET bank', e); }
+if (process.env.YNEET_DATABASE_URL) {
+  yneetBridge.check()
+    .then((r) => console.log(`[yneet] linked to app.yneet.in: ${JSON.stringify(r)}`))
+    .catch((e) => console.error(`[yneet] could not reach app.yneet.in database: ${e.message}`));
+}
 if (config.enableCron) startCron();
 if (tmSync.enabled() && config.store === 'mongo') tmSync.startSync(Number(process.env.TESTMANDI_SYNC_MINUTES || 15));
 

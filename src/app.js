@@ -214,7 +214,11 @@ async function productOnSharedNumber(ev) {
   if (/\b[TS]REF\s/.test(upper)) return 'testmandi';
   if (/^JOIN\s/.test(upper) || /\bCREF\s/.test(upper)) return 'classcoach';
   if (/\bREF\s/.test(upper)) return 'yneet';
-  const pick = { 'pick:yneet': 'yneet', 'pick:testmandi': 'testmandi', 'pick:classcoach': 'classcoach' }[ev.replyId];
+  // Website buttons and ads send "Hi YNeet", "Hi TestMandi" or "Hi ClassCoach": go straight there and remember it
+  const kw = /\bTEST\s?MANDI\b/.test(upper) ? 'testmandi'
+    : /\b(CLASS\s?COACH|TEACHER|TUTOR)\b/.test(upper) ? 'classcoach'
+    : /\b(Y\s?NEET|NEET)\b/.test(upper) ? 'yneet' : null;
+  const pick = kw || { 'pick:yneet': 'yneet', 'pick:testmandi': 'testmandi', 'pick:classcoach': 'classcoach' }[ev.replyId];
   if (pick) { await db.sessions.updateOne({ product: '_shared', phone: ev.from }, { $set: { pick } }, { upsert: true }); return pick; }
   const s = await db.sessions.findOne({ product: '_shared', phone: ev.from });
   if (s?.pick && upper !== 'SWITCH') return s.pick;
