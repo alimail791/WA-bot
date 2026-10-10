@@ -516,7 +516,7 @@ export async function notifyLiveStarts(now = Date.now()) {
           await send('testmandi', u.phone, { type: 'link', text: `🔴 LIVE now: ${t.title}\nJoin in the next ${minsLeft} min to be ranked on the live leaderboard.`, url, label: 'Join live test' });
           sent++;
         } else if (process.env.TEMPLATE_LIVE_START) {
-          await send('testmandi', u.phone, { type: 'template', name: process.env.TEMPLATE_LIVE_START, params: [t.title, String(minsLeft)] });
+          await send('testmandi', u.phone, { type: 'template', name: process.env.TEMPLATE_LIVE_START, params: [t.title, String(minsLeft)], buttons: [`live:${t.code}`], direct: true });
           sent++;
         }
       }

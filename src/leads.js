@@ -288,6 +288,21 @@ export async function intercept(ev, { setPick } = {}) {
     return false;
   }
 
+  if (ev.replyId?.startsWith('live:')) {
+    if (setPick) await setPick(phone, 'testmandi');
+    const { handleInbound } = await import('./engine.js');
+    await handleInbound({ product: 'testmandi', phone, name: ev.name, replyId: `tm:start:${ev.replyId.slice(5)}` });
+    return true;
+  }
+  if (ev.replyId?.startsWith('pay:')) {
+    const order = await db.orders.findOne({ _id: ev.replyId.slice(4) });
+    if (order && order.phone === phone) {
+      if (setPick) await setPick(phone, order.product);
+      if (order.status === 'paid') await send(order.product, phone, { type: 'text', text: `✅ ${order.title} is already paid. Send MENU to continue.` });
+      else await send(order.product, phone, { type: 'link', text: `${order.title}\n${'₹' + order.amount} · pay with any UPI app and it unlocks instantly.`, url: order.link, label: 'Pay now' });
+      return true;
+    }
+  }
   if (ev.replyId?.startsWith('lead:')) {
     await handleLeadReply(phone, ev.replyId, { setPick, name: ev.name });
     return true;

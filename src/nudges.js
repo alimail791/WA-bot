@@ -5,7 +5,7 @@ import { db } from './store.js';
 import { send } from './providers/index.js';
 import { within24h } from './engine.js';
 import { rupees } from './products.js';
-import { istDate, DAY } from './util.js';
+import { istDate, DAY, HOUR } from './util.js';
 
 const T = (name) => process.env[name] || '';
 
@@ -20,6 +20,26 @@ export async function nudgeAbandonedOrders(now = Date.now()) {
     const paid = await db.orders.count({ product: o.product, phone: o.phone, status: 'paid', createdAt: { $gte: o.createdAt } });
     if (paid) continue;
     await send(o.product, o.phone, { type: 'link', text: `Your ${o.title} is waiting 🙂\n${rupees(o.amount)} · pay with any UPI app and it unlocks instantly.\nQuestions? Just reply here.`, url: o.link, label: 'Finish payment' });
+    sent++;
+  }
+  return sent;
+}
+
+// 1b) Next-day reminder for unpaid orders (20–30 hours old). Inside the 24h window it's a free message;
+// outside it uses the TEMPLATE_PAYMENT_REMINDER template (params: item title, amount) with a "Complete payment" button.
+export async function nudgeUnpaidNextDay(now = Date.now()) {
+  const orders = await db.orders.find({ status: 'created', nudged2: { $ne: true }, amount: { $gt: 0 }, createdAt: { $lte: new Date(now - 20 * HOUR), $gte: new Date(now - 30 * HOUR) } });
+  let sent = 0;
+  for (const o of orders) {
+    await db.orders.updateOne({ _id: o._id }, { $set: { nudged2: true } });
+    const u = await db.users.findOne({ product: o.product, phone: o.phone });
+    if (!u || u.optedOut) continue;
+    const paid = await db.orders.count({ product: o.product, phone: o.phone, status: 'paid', createdAt: { $gte: o.createdAt } });
+    if (paid) continue;
+    if (within24h(u)) await send(o.product, o.phone, { type: 'link', text: `Still want ${o.title}? 🙂
+${rupees(o.amount)} · pay with any UPI app and it unlocks instantly.`, url: o.link, label: 'Complete payment' });
+    else if (T('TEMPLATE_PAYMENT_REMINDER')) await send(o.product, o.phone, { type: 'template', name: T('TEMPLATE_PAYMENT_REMINDER'), params: [o.title, rupees(o.amount)], buttons: [`pay:${o._id}`], direct: true });
+    else continue;
     sent++;
   }
   return sent;
@@ -80,6 +100,7 @@ export function startCron() {
   const tz = { timezone: 'Asia/Kolkata' };
   const safe = (name, fn) => async () => { try { await fn(); } catch (e) { console.error(`[cron] ${name} failed`, e); } };
   cron.schedule('*/10 * * * *', safe('abandoned', nudgeAbandonedOrders), tz);
+  cron.schedule('7 * * * *', safe('unpaid-next-day', nudgeUnpaidNextDay), tz);
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);

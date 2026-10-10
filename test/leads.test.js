@@ -166,17 +166,17 @@ test('Follow-ups: 2nd message after 3 days, last message 4 days later, then cold
   await leads.importLeads('9111100001,Kumar,Kumar Tuition Centre,tuition,Karur');
   const ph = '919111100001';
   await leads.sendStep(await db.leads.findOne({ phone: ph }), 0);
-  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(Date.now() - 3.1 * DAY) } });
+  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(at11() - 3.1 * DAY) } });
   await leads.campaignTick(at11());
   let m = sim.messages('classcoach', ph).at(-1);
   assert.equal(m.name, 'ra_lead_followup');
   assert.deepEqual(m.params, ['Kumar', 'ClassCoach WhatsApp quizzes for your students']);
-  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(Date.now() - 4.1 * DAY) } });
+  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(at11() - 4.1 * DAY) } });
   await leads.campaignTick(at11());
   m = sim.messages('classcoach', ph).at(-1);
   assert.equal(m.name, 'ra_lead_final');
   assert.deepEqual(m.buttons, ['lead:demo', 'lead:no']);
-  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(Date.now() - 5.1 * DAY) } });
+  await db.leads.updateOne({ phone: ph }, { $set: { lastSentAt: new Date(at11() - 5.1 * DAY) } });
   await leads.campaignTick(at11());
   assert.equal((await db.leads.findOne({ phone: ph })).stage, 'cold');
 });
@@ -281,4 +281,15 @@ test('WhatsApp check page explains a missing app subscription and can reconnect'
     assert.match(html, /Reconnected/);
     assert.match(html, /Bot app connected to your WhatsApp account \(wa-bot\)/);
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('Template buttons: "Complete payment" resends the pay link, "Join now" sends the live test link', async () => {
+  const ph = '919444400001';
+  const order = await db.orders.insertOne({ product: 'testmandi', phone: ph, title: 'SSC GK Mock', amount: 29, status: 'created', link: 'https://rzp.io/x', createdAt: new Date() });
+  await tap(ph, `pay:${order._id}`); await wait();
+  const m = fresh(ph).find((x) => x.type === 'link');
+  assert.equal(m?.url, 'https://rzp.io/x');
+  await db.users.updateOne({ product: 'testmandi', phone: ph }, { $set: { purchases: ['SSC-GK-101'] } }, { upsert: true });
+  await tap(ph, 'live:SSC-GK-101'); await wait(120);
+  assert.ok(fresh(ph).some((x) => x.type === 'link' && /\/t\//.test(x.url)), 'magic test link sent');
 });
