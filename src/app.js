@@ -8,6 +8,7 @@ import { parseWebhook, parseExtras } from './providers/meta.js';
 import * as leads from './leads.js';
 import { leadsPage } from './leadsPage.js';
 import * as waCheck from './waCheck.js';
+import * as payCheck from './payCheck.js';
 import * as sim from './providers/sim.js';
 import { openMagicLink, consumeMagicLink } from './magic.js';
 import { getQuestions, grade, csvToQuestions } from './questions.js';
@@ -261,6 +262,7 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
   // ---- Leads console: /admin/leads?key=ADMIN_KEY ------------------------
   const keyed = (req, res, next) => (safeEqual(String(req.query.key || req.get('x-api-key') || ''), config.adminKey) ? next() : res.status(401).send('Add ?key=YOUR_ADMIN_KEY to the address. The key is the ADMIN_KEY variable in Railway.'));
   app.get('/admin/whatsapp', keyed, async (req, res) => res.send(waCheck.page(await waCheck.check({ fix: req.query.fix === '1' }), String(req.query.key || ''))));
+  app.get('/admin/payments', keyed, async (_req, res) => res.send(payCheck.page(await payCheck.check())));
   app.get('/admin/leads', keyed, (_req, res) => res.send(leadsPage()));
   app.get('/admin/leads/summary', keyed, async (_req, res) => {
     const since = new Date(Date.now() - 7 * 86400e3);
