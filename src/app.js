@@ -30,6 +30,23 @@ export function createApp() {
   app.use(express.json({ limit: '8mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
   app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
+  // Public legal pages for the Meta app settings (Privacy Policy URL, User data deletion URL)
+  const legal = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · ${config.wa.businessName}</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#1d2030}h1{font-size:24px}h2{font-size:18px;margin-top:24px}</style></head><body><h1>${title}</h1><p><i>${config.wa.businessName} (YNeet, TestMandi, ClassCoach) · Last updated 10 October 2026</i></p>${body}</body></html>`;
+  app.get('/privacy', (_req, res) => res.send(legal('Privacy Policy', `
+<p>This policy explains how ${config.wa.businessName} uses information when you chat with us on WhatsApp at +${config.wa.displayNumbers.yneet} or use YNeet (yneet.in), TestMandi (testmandi.in) and ClassCoach (classcoach.in).</p>
+<h2>What we collect</h2><p>Your WhatsApp number and profile name; the messages and button choices you send us; your test answers, scores and class or exam details; and payment status for purchases (payments are processed by Razorpay, we never see your card or bank details).</p>
+<h2>How we use it</h2><p>To answer your messages, run quizzes and tests, show results and ranks, deliver what you bought, send reminders you asked for, and follow up on enquiries about our products. We do not sell your information.</p>
+<h2>Who we share it with</h2><p>Meta (WhatsApp) to deliver messages, Razorpay to process payments, and our hosting and database providers. For ClassCoach, your quiz marks are shared with the teacher whose class you joined. For TestMandi, sellers see sales of their tests but not your phone number.</p>
+<h2>Your choices</h2><p>Send STOP at any time to stop messages from us. Send HELP to talk to a person. To delete your data, see <a href="/data-deletion">Data deletion</a>.</p>
+<h2>Retention</h2><p>We keep chat and test records while you use our services and for up to 2 years after your last message, unless you ask us to delete them earlier.</p>
+<h2>Contact</h2><p>${config.wa.businessName}, Tamil Nadu, India · WhatsApp +${config.wa.displayNumbers.yneet}</p>`)));
+  app.get('/data-deletion', (_req, res) => res.send(legal('Data deletion', `
+<p>You can ask us to delete all information linked to your WhatsApp number (chats, test results, leads records and preferences).</p>
+<h2>How to request deletion</h2><ol><li>Send <b>DELETE MY DATA</b> to us on WhatsApp at +${config.wa.displayNumbers.yneet}, from the number you want deleted.</li><li>We confirm and delete your records within 7 days. Payment records we must keep by law are retained only as long as required.</li></ol>
+<p>You can also send STOP at any time to stop all messages without deleting your data.</p>`)));
+  app.get('/terms', (_req, res) => res.send(legal('Terms of Service', `
+<p>By using our WhatsApp assistant and websites you agree to use them for lawful study and teaching purposes. Test content belongs to ${config.wa.businessName} or the TestMandi seller who created it and may not be copied or resold. Purchases unlock digital access immediately and are non-refundable except where required by law or where access could not be delivered. Prices and plans are shown before payment. We may update these terms; the latest version is always on this page.</p>`)));
+
   app.get('/health', (_req, res) => res.json({ ok: true, provider: config.provider, store: config.store }));
 
   // ---- WhatsApp webhook ----------------------------------------------
