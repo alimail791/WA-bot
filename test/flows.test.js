@@ -608,3 +608,11 @@ test('ClassCoach link: classcoach.in plan is used on WhatsApp; WhatsApp purchase
     assert.match(textOf(m), /Already on classcoach\.in\?/);
   } finally { cc.setImpl(null); }
 });
+
+test('Owner dashboard needs the admin key and shows numbers per product', async () => {
+  assert.equal((await fetch(`${base}/admin/dashboard`)).status, 401);
+  const r = await fetch(`${base}/admin/dashboard?key=${encodeURIComponent(config.adminKey)}`);
+  assert.equal(r.status, 200);
+  const html = await r.text();
+  assert.match(html, /YNeet/); assert.match(html, /TestMandi/); assert.match(html, /ClassCoach/); assert.match(html, /Last 7 days/);
+});

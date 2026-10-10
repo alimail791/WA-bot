@@ -185,22 +185,48 @@ export function createApp() {
     res.json({ ok: true, test: { ...saved, qidsCount: saved.qids?.length }, shareLink: waLink(config.wa.displayNumbers.testmandi, `TEST ${code}`) });
   });
 
-  app.get('/admin/stats', admin, async (_req, res) => {
+  async function stats(days) {
     const out = {};
-    const since = new Date(Date.now() - 7 * 86400e3);
+    const since = new Date(Date.now() - days * 86400e3);
     for (const p of productKeys) {
       const paid = await db.orders.find({ product: p, status: 'paid', paidAt: { $gte: since } });
-      out[p] = {
+      const r = {
         users: await db.users.count({ product: p }),
-        newUsers7d: await db.users.count({ product: p, createdAt: { $gte: since } }),
-        ordersCreated7d: await db.orders.count({ product: p, createdAt: { $gte: since } }),
-        ordersPaid7d: paid.length,
-        revenue7d: paid.reduce((s, o) => s + o.amount, 0),
-        attempts7d: await db.attempts.count({ product: p, at: { $gte: since } }),
+        newUsers: await db.users.count({ product: p, createdAt: { $gte: since } }),
+        activeUsers: await db.users.count({ product: p, lastInboundAt: { $gte: since } }),
+        tests: await db.attempts.count({ product: p, at: { $gte: since } }),
+        payLinks: await db.orders.count({ product: p, createdAt: { $gte: since }, amount: { $gt: 0 } }),
+        paid: paid.filter((o) => o.amount > 0).length,
+        revenue: paid.reduce((s, o) => s + (o.amount || 0), 0),
       };
-      out[p].paymentConversion = out[p].ordersCreated7d ? Math.round((out[p].ordersPaid7d / out[p].ordersCreated7d) * 100) + '%' : '-';
+      r.conversion = r.payLinks ? Math.round((r.paid / r.payLinks) * 100) : null;
+      out[p] = r;
     }
-    res.json(out);
+    return out;
+  }
+
+  app.get('/admin/stats', admin, async (req, res) => res.json(await stats(Number(req.query.days) || 7)));
+
+  // Owner dashboard in the browser: /admin/dashboard?key=ADMIN_KEY
+  app.get('/admin/dashboard', async (req, res) => {
+    if (!safeEqual(String(req.query.key || ''), config.adminKey)) return res.status(401).send('Add ?key=YOUR_ADMIN_KEY to the address. The key is the ADMIN_KEY variable in Railway.');
+    const ranges = [[1, 'Today (24h)'], [7, 'Last 7 days'], [30, 'Last 30 days']];
+    const data = await Promise.all(ranges.map(([d]) => stats(d)));
+    const names = { yneet: 'YNeet', testmandi: 'TestMandi', classcoach: 'ClassCoach' };
+    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
+    const rows = (st) => productKeys.map((p) => {
+      const r = st[p];
+      const hint = r.payLinks >= 5 && r.conversion !== null && r.conversion < 20 ? 'Many tap Pay but few finish: try a lower first price' : r.activeUsers >= 20 && r.payLinks === 0 ? 'People use it but nobody taps Pay: push the paid offer harder' : '';
+      return `<tr><td>${names[p]}</td><td>${r.newUsers}</td><td>${r.activeUsers}</td><td>${r.tests}</td><td>${r.payLinks}</td><td>${r.paid}</td><td><b>${inr(r.revenue)}</b></td><td>${r.conversion === null ? '–' : r.conversion + '%'}</td><td class="hint">${hint}</td></tr>`;
+    }).join('');
+    const total = (st) => productKeys.reduce((s, p) => s + st[p].revenue, 0);
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raise Academy bot · numbers</title>
+<style>body{font:15px/1.45 system-ui,sans-serif;margin:0;padding:16px;background:#f5f6fa;color:#1b1d2e}main{max-width:980px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.muted{color:#5d6278;font-size:13px}
+section{background:#fff;border:1px solid #dfe1ea;border-radius:12px;padding:14px;margin-top:14px;overflow-x:auto}h2{font-size:17px;margin:0 0 8px;display:flex;justify-content:space-between}table{border-collapse:collapse;width:100%;min-width:720px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid #eceef4;font-variant-numeric:tabular-nums}th{font-size:12px;color:#5d6278;text-transform:uppercase;letter-spacing:.04em}.hint{color:#a35a00;font-size:13px}</style></head>
+<body><main><h1>Raise Academy WhatsApp bot</h1><div class="muted">Updated ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST · Refresh the page for new numbers</div>
+${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(total(data[i]))}</span></h2><table><thead><tr><th>Product</th><th>New users</th><th>Active users</th><th>Tests taken</th><th>Pay taps</th><th>Paid</th><th>Revenue</th><th>Pay → paid</th><th>What to do</th></tr></thead><tbody>${rows(data[i])}</tbody></table></section>`).join('')}
+<p class="muted">Pay taps = payment links sent. Pay → paid = how many of those were completed.</p></main></body></html>`);
   });
 
   app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Server error' }); });
