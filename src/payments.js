@@ -16,7 +16,7 @@ export async function createOrder({ product, phone, item, title, amount, meta = 
   }
   // Reuse a recent unpaid order for the same item so repeated taps don't create many links
   const recent = await db.orders.findOne({ product, phone, item, status: 'created', createdAt: { $gte: new Date(Date.now() - 6 * 3600e3) } });
-  if (recent && recent.amount === amount) return recent;
+  if (recent && recent.amount === amount && (recent.rzpOrderId || !config.razorpay.keyId)) return recent;
 
   const order = await db.orders.insertOne({ product, phone, item, title, amount, meta, status: 'created', createdAt: new Date(), nudged: false });
   let link = `${config.baseUrl}/dev/pay/${order._id}`;
