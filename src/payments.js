@@ -16,7 +16,7 @@ export async function createOrder({ product, phone, item, title, amount, meta = 
   }
   // Reuse a recent unpaid order for the same item so repeated taps don't create many links
   const recent = await db.orders.findOne({ product, phone, item, status: 'created', createdAt: { $gte: new Date(Date.now() - 6 * 3600e3) } });
-  if (recent && recent.amount === amount && (recent.rzpOrderId || !config.razorpay.keyId)) return recent;
+  if (recent && recent.amount === amount && (!config.razorpay.keyId || (recent.rzpOrderId && recent.link === (config.payBase ? `${config.payBase}/pay/${recent._id}` : recent.rzpLink)))) return recent;
 
   const order = await db.orders.insertOne({ product, phone, item, title, amount, meta, status: 'created', createdAt: new Date(), nudged: false });
   let link = `${config.baseUrl}/dev/pay/${order._id}`;
@@ -34,7 +34,7 @@ export async function createOrder({ product, phone, item, title, amount, meta = 
     } });
     if (pl.ok) { rzpLink = pl.data.short_url; providerId = pl.data.id; } else console.error('[razorpay] link failed', pl.data);
     if (!rzpOrderId && !rzpLink) throw new Error('Could not create payment link');
-    link = rzpOrderId ? `${config.baseUrl}/pay/${order._id}` : rzpLink;
+    link = rzpOrderId && (config.payBase || !rzpLink) ? `${config.payBase || config.baseUrl}/pay/${order._id}` : rzpLink;
   }
   await db.orders.updateOne({ _id: order._id }, { $set: { link, providerId, rzpLink, rzpOrderId } });
   await track(product, phone, 'order_created', { item, amount });

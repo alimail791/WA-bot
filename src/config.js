@@ -53,6 +53,11 @@ export const config = {
   // Optional: a real deadline for a limited-time offer, e.g. 2026-11-30. Leave empty for no offer.
   offerEndsOn: env.OFFER_ENDS_ON || '',
 
+  // Our own payment page (UPI apps first on phones, QR on computers). Razorpay only allows checkout on websites
+  // registered in your Razorpay account, so set this to a registered address, e.g. https://pay.yneet.in.
+  // Empty = customers get Razorpay's hosted payment link instead.
+  payBase: (env.PAY_BASE_URL || '').replace(/\/$/, ''),
+
   adminKey: env.ADMIN_KEY || 'admin-dev-key',
   enableCron: env.ENABLE_CRON !== 'false',
 };

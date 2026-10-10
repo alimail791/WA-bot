@@ -8,6 +8,7 @@ process.env.PROVIDER = 'sim';
 process.env.ENABLE_CRON = 'false';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_abc';
 process.env.RAZORPAY_KEY_SECRET = 'secret123';
+process.env.PAY_BASE_URL = 'http://PAYBASE';
 
 const realFetch = globalThis.fetch;
 const rzpCalls = [];
@@ -34,7 +35,11 @@ after(() => { server.close(); globalThis.fetch = realFetch; });
 
 test('Order gets our payment page link with a Razorpay order and a backup payment link', async () => {
   const o = await pay.createOrder({ product: 'testmandi', phone: '919000000700', item: 'test:X', title: 'NEET Physics Test 7', amount: 49 });
-  assert.equal(o.link, `${base}/pay/${o._id}`);
+  assert.equal(o.link, `http://PAYBASE/pay/${o._id}`);
+  config.payBase = '';
+  const o2 = await pay.createOrder({ product: 'testmandi', phone: '919000000799', item: 'test:Y', title: 'Other', amount: 29 });
+  assert.equal(o2.link, 'https://rzp.io/rzp/abc', 'without a registered pay address, the Razorpay link is used');
+  config.payBase = 'http://PAYBASE';
   assert.equal(o.rzpOrderId, 'order_TEST1');
   assert.equal(o.rzpLink, 'https://rzp.io/rzp/abc');
   assert.equal(rzpCalls.find((c) => c.u.endsWith('/orders')).body.amount, 4900);
