@@ -126,12 +126,19 @@ export async function importLeads(text, { defaultType = '', source = 'import', t
   const existingLeads = new Map(), customers = new Set();
   for (let i = 0; i < phones.length; i += 500) {
     const chunk = phones.slice(i, i + 500);
-    for (const l of await db.leads.find({ phone: { $in: chunk } }, { projection: { phone: 1, name: 1, org: 1, city: 1 } })) existingLeads.set(l.phone, l);
+    for (const l of await db.leads.find({ phone: { $in: chunk } }, { projection: { phone: 1, name: 1, org: 1, city: 1, stage: 1, sent: 1, segment: 1 } })) existingLeads.set(l.phone, l);
     for (const u of await db.users.find({ phone: { $in: chunk } }, { projection: { phone: 1 } })) customers.add(u.phone);
   }
   const fresh = [];
   for (const c of seen.values()) {
     const old = existingLeads.get(c.phone);
+    if (old && old.stage === 'new' && !old.sent) {
+      // Not messaged yet: the newer sheet wins (fixes names and types from an earlier upload)
+      const patch = { name: c.name, org: c.org, city: c.city || old.city || '', typeText: c.typeText, segment: c.segment, product: SEGMENTS[c.segment].product };
+      const changed = ['name', 'org', 'city', 'segment'].some((k) => (old[k] || '') !== (patch[k] || ''));
+      if (changed) { await db.leads.updateOne({ phone: c.phone }, { $set: patch }); out.updated++; } else out.skipped++;
+      continue;
+    }
     if (old) {
       const patch = {};
       if (!old.name && c.name) patch.name = c.name;

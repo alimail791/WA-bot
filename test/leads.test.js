@@ -254,6 +254,13 @@ test('Big import: 5,000 rows go in one request, quickly', async () => {
   const again = await leads.importLeads(rows.slice(0, 101).join('\n'));
   assert.equal(again.added, 0);
   assert.equal(again.skipped, 100);
+  // A corrected sheet replaces details of contacts not messaged yet
+  const fixed = await leads.importLeads('Mobile,Name,Institute,Type,City\n9700000001,,City Home Tuitions,Tuition / Tutor,Chennai');
+  assert.equal(fixed.updated, 1);
+  const l = await db.leads.findOne({ phone: '919700000001' });
+  assert.equal(l.name, '');
+  assert.equal(l.org, 'City Home Tuitions');
+  assert.equal(l.segment, 'tutor');
 });
 
 test('WhatsApp check page explains a missing app subscription and can reconnect', async () => {
