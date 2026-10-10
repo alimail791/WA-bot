@@ -9,6 +9,7 @@ import * as leads from './leads.js';
 import { leadsPage } from './leadsPage.js';
 import * as waCheck from './waCheck.js';
 import * as payCheck from './payCheck.js';
+import { homePage, refundPage, contactPage, shell } from './sitePages.js';
 import * as sim from './providers/sim.js';
 import { openMagicLink, consumeMagicLink } from './magic.js';
 import { getQuestions, grade, csvToQuestions } from './questions.js';
@@ -32,7 +33,10 @@ export function createApp() {
   app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
   // Public legal pages for the Meta app settings (Privacy Policy URL, User data deletion URL)
-  const legal = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · ${config.wa.businessName}</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#1d2030}h1{font-size:24px}h2{font-size:18px;margin-top:24px}</style></head><body><h1>${title}</h1><p><i>${config.wa.businessName} (YNeet, TestMandi, ClassCoach) · Last updated 10 October 2026</i></p>${body}</body></html>`;
+  const legal = (title, body) => shell(title, `<h1>${title}</h1><p class="muted">${config.wa.businessName} (YNeet, TestMandi, ClassCoach) · Last updated 10 October 2026</p>${body}`);
+  app.get('/', (_req, res) => res.send(homePage()));
+  app.get('/refund', (_req, res) => res.send(refundPage()));
+  app.get('/contact', (_req, res) => res.send(contactPage()));
   app.get('/privacy', (_req, res) => res.send(legal('Privacy Policy', `
 <p>This policy explains how ${config.wa.businessName} uses information when you chat with us on WhatsApp at +${config.wa.displayNumbers.yneet} or use YNeet (yneet.in), TestMandi (testmandi.in) and ClassCoach (classcoach.in).</p>
 <h2>What we collect</h2><p>Your WhatsApp number and profile name; the messages and button choices you send us; your test answers, scores and class or exam details; and payment status for purchases (payments are processed by Razorpay, we never see your card or bank details).</p>
@@ -194,7 +198,6 @@ export function createApp() {
 
   // ---- Simulator (only with the sim provider) -------------------------
   if (config.provider === 'sim') {
-    app.get('/', (_req, res) => res.redirect('/sim'));
     app.get('/sim', (_req, res) => res.sendFile(new URL('../public/sim.html', import.meta.url).pathname));
     app.post('/dev/send', async (req, res) => {
       const { product, phone, text, replyId, name } = req.body;
