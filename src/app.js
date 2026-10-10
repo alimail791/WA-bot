@@ -4,7 +4,9 @@ import { config } from './config.js';
 import { db } from './store.js';
 import { products, productKeys } from './products.js';
 import { handleInbound, dispatchAttempt, getUser } from './engine.js';
-import { parseWebhook } from './providers/meta.js';
+import { parseWebhook, parseExtras } from './providers/meta.js';
+import * as leads from './leads.js';
+import { leadsPage } from './leadsPage.js';
 import * as sim from './providers/sim.js';
 import { openMagicLink, consumeMagicLink } from './magic.js';
 import { getQuestions, grade, csvToQuestions } from './questions.js';
@@ -24,7 +26,7 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   // Keep the raw body for signature checks
-  app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
+  app.use(express.json({ limit: '8mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
   app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
   app.get('/health', (_req, res) => res.json({ ok: true, provider: config.provider, store: config.store }));
@@ -42,10 +44,17 @@ export function createApp() {
       if (!safeEqual(sig, hmac(req.rawBody || '', config.wa.appSecret))) return res.sendStatus(401);
     }
     res.sendStatus(200); // answer fast; WhatsApp retries slow webhooks
+    const extras = parseExtras(req.body);
+    for (const st of extras.statuses) leads.onStatus(st).catch((e) => console.error('[leads] status', e.message));
+    for (const e of extras.echoes) leads.onAppEcho(e.to).catch((err) => console.error('[leads] echo', err.message));
+    for (const q of extras.quality) leads.onQualityUpdate(q).catch((e) => console.error('[leads] quality', e.message));
     for (const ev of parseWebhook(req.body)) {
       if (ev.id && seen.has(ev.id)) continue;
       if (ev.id) seen.set(ev.id, Date.now());
       if (seen.size > 5000) for (const [k, t] of seen) if (Date.now() - t > 3600e3) seen.delete(k);
+      try {
+        if (await leads.intercept(ev, { setPick })) continue;
+      } catch (e) { console.error('[leads] intercept', e); }
       let product = productForNumber(ev.phoneNumberId);
       const shared = !product && ev.phoneNumberId === config.wa.sharedNumberId;
       if (shared) product = await productOnSharedNumber(ev);
@@ -230,8 +239,79 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
 <p class="muted">Pay taps = payment links sent. Pay → paid = how many of those were completed.</p></main></body></html>`);
   });
 
+  // ---- Leads console: /admin/leads?key=ADMIN_KEY ------------------------
+  const keyed = (req, res, next) => (safeEqual(String(req.query.key || req.get('x-api-key') || ''), config.adminKey) ? next() : res.status(401).send('Add ?key=YOUR_ADMIN_KEY to the address. The key is the ADMIN_KEY variable in Railway.'));
+  app.get('/admin/leads', keyed, (_req, res) => res.send(leadsPage()));
+  app.get('/admin/leads/summary', keyed, async (_req, res) => {
+    const since = new Date(Date.now() - 7 * 86400e3);
+    const cnt = (type) => db.events.count({ product: 'leads', type, at: { $gte: since } });
+    const [sent, taps, stops, failed] = await Promise.all([cnt('lead_sent'), cnt('lead_tap'), cnt('lead_stop'), cnt('lead_failed')]);
+    const read = await db.leads.count({ readAt: { $gte: since } });
+    const { bySeg, total } = await leads.funnel();
+    res.json({
+      campaign: await leads.getCampaign(), sentToday: await leads.sentToday(), bySeg, total,
+      week: { sent, read, taps, stops, failed, stopPct: sent ? Math.round((stops / sent) * 1000) / 10 : 0 },
+      maxStopPct: Number(process.env.LEAD_MAX_STOP_PCT || 5),
+      segments: Object.fromEntries(Object.entries(leads.SEGMENTS).map(([k, v]) => [k, { label: v.label, product: v.product, template: v.template }])),
+      team: String(process.env.LEAD_TEAM || 'Akbar,Assistant').split(',').map((s) => s.trim()).filter(Boolean),
+      owner: leads.ownerPhones()[0] || '',
+    });
+  });
+  app.get('/admin/leads/list', keyed, async (req, res) => {
+    const view = String(req.query.view || 'hot');
+    const filter = view === 'hot' ? { hot: true, stage: { $nin: ['customer', 'lost'] } } : view === 'all' ? {} : { stage: view };
+    if (leads.SEGMENTS[req.query.segment]) filter.segment = req.query.segment;
+    const size = 25, page = Math.max(0, Number(req.query.page) || 0);
+    const sort = view === 'hot' ? { hotAt: -1 } : view === 'all' ? { createdAt: -1 } : { stageAt: -1 };
+    const q = String(req.query.q || '').trim().toLowerCase();
+    let rows;
+    if (q) {
+      const digits = q.replace(/\D/g, '');
+      rows = (await db.leads.find(filter, { sort })).filter((l) => (digits.length >= 4 && l.phone.includes(digits)) || `${l.name} ${l.org} ${l.city}`.toLowerCase().includes(q));
+      rows = rows.slice(page * size, page * size + size + 1);
+    } else rows = await db.leads.find(filter, { sort, skip: page * size, limit: size + 1 });
+    res.json({ leads: rows.slice(0, size), more: rows.length > size });
+  });
+  app.post('/admin/leads/import', keyed, async (req, res) => {
+    const text = String(req.body?.text || '');
+    if (text.length > 5e6) return res.status(413).json({ error: 'File too large. Split it into smaller sheets.' });
+    res.json(await leads.importLeads(text, { defaultType: req.body?.defaultType || '', tag: String(req.body?.tag || '').slice(0, 40) }));
+  });
+  app.post('/admin/leads/campaign', keyed, async (req, res) => {
+    const b = req.body || {};
+    const patch = {};
+    for (const k of ['running', 'sundays']) if (typeof b[k] === 'boolean') patch[k] = b[k];
+    for (const k of ['dailyCap', 'startHour', 'endHour']) if (b[k] !== undefined) patch[k] = Number(b[k]);
+    res.json(await leads.setCampaign(patch));
+  });
+  app.post('/admin/leads/update', keyed, async (req, res) => {
+    const { phone, stage, owner, note, hot, by } = req.body || {};
+    const lead = await db.leads.findOne({ phone: String(phone || '') });
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const $set = {}, extra = {};
+    if (stage && [...leads.STAGES, 'lost', 'cold'].includes(stage)) { $set.stage = stage; $set.stageAt = new Date(); if (stage === 'lost') $set.lostWhy = 'manual'; }
+    if (typeof owner === 'string') $set.owner = owner.slice(0, 30);
+    if (typeof hot === 'boolean') $set.hot = hot;
+    if (note) extra.$push = { notes: { text: String(note).slice(0, 500), by: String(by || '').slice(0, 30), at: new Date() } };
+    res.json({ ok: true, lead: await db.leads.updateOne({ phone: lead.phone }, { $set: { ...$set, updatedAt: new Date() }, ...extra }) });
+  });
+  app.post('/admin/leads/test', keyed, async (req, res) => {
+    const { cleanPhone, SEGMENTS, sendStep } = leads;
+    const phone = cleanPhone(req.body?.phone);
+    const segment = SEGMENTS[req.body?.segment] ? req.body.segment : 'tutor';
+    if (!phone) return res.status(400).json({ ok: false, error: 'Enter a 10-digit mobile number' });
+    const r = await sendStep({ phone, name: 'Akbar', org: '', segment, product: SEGMENTS[segment].product, stage: 'new' }, Number(req.body?.step) || 0, { test: true });
+    let error = '';
+    if (r?.ok === false) { try { error = JSON.parse(r.body).error?.message || r.body; } catch { error = String(r.body || r.status); } }
+    res.json({ ok: r?.ok !== false, error: String(error).slice(0, 300) });
+  });
+
   app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Server error' }); });
   return app;
+}
+
+async function setPick(phone, pick) {
+  await db.sessions.updateOne({ product: '_shared', phone }, { $set: { pick } }, { upsert: true });
 }
 
 // One shared number for all products: remember the user's choice, otherwise ask.

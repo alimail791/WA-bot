@@ -83,5 +83,8 @@ export function startCron() {
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);
+  cron.schedule('*/5 * * * *', safe('lead-campaign', async () => (await import('./leads.js')).campaignTick()), tz);
+  cron.schedule('17 * * * *', safe('lead-onboarding', async () => (await import('./leads.js')).onboardingTick()), tz);
+  cron.schedule('3 9 * * *', safe('lead-summary', async () => (await import('./leads.js')).dailySummary()), tz);
   cron.schedule('* * * * *', safe('live-start', async () => (await import('./flows/testmandi.js')).notifyLiveStarts()), tz);
 }

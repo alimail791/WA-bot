@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 
-const COLLECTIONS = ['users', 'sessions', 'questions', 'tests', 'attempts', 'orders', 'tokens', 'classes', 'events'];
+const COLLECTIONS = ['users', 'sessions', 'questions', 'tests', 'attempts', 'orders', 'tokens', 'classes', 'events', 'leads', 'kv'];
 
 function match(doc, filter) {
   return Object.entries(filter).every(([k, cond]) => {
@@ -11,6 +11,7 @@ function match(doc, filter) {
     if (cond && typeof cond === 'object' && !Array.isArray(cond) && !(cond instanceof Date)) {
       return Object.entries(cond).every(([op, x]) => {
         if (op === '$in') return x.some((y) => eq(v, y) || (Array.isArray(v) && v.some((z) => eq(z, y))));
+        if (op === '$nin') return !x.some((y) => eq(v, y) || (Array.isArray(v) && v.some((z) => eq(z, y))));
         if (op === '$gte') return v != null && v >= x;
         if (op === '$lte') return v != null && v <= x;
         if (op === '$gt') return v != null && v > x;
@@ -111,6 +112,11 @@ export async function connect() {
       d.collection('tests').createIndex({ code: 1 }, { unique: true }),
       d.collection('classes').createIndex({ code: 1 }, { unique: true }),
       d.collection('attempts').createIndex({ testId: 1, score: -1 }),
+      d.collection('leads').createIndex({ phone: 1 }, { unique: true }),
+      d.collection('leads').createIndex({ stage: 1, step: 1, lastSentAt: 1 }),
+      d.collection('leads').createIndex({ stage: 1, createdAt: 1 }),
+      d.collection('kv').createIndex({ key: 1 }, { unique: true }),
+      d.collection('events').createIndex({ product: 1, type: 1, at: -1 }),
     ]);
   } else {
     for (const name of COLLECTIONS) db[name] = new MemoryCollection();

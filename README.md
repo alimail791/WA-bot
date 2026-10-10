@@ -164,3 +164,7 @@ Teachers schedule live tests on testmandi.in. The bot syncs them every 2 minutes
 ## Referral rewards that mirror testmandi.in
 - A TestMandi seller who invites a student (TREF link) gets ₹200 in their testmandi.in payout balance when the student's first WhatsApp purchase is paid.
 - A teacher who signs up with a seller's code earns that seller ₹200 when they publish their first test (handled by testmandi.in).
+
+## Lead engine (open /admin/leads?key=ADMIN_KEY)
+Import Excel/CSV contact lists → the bot sends a safe daily campaign (daily cap, 10 AM–7 PM, Mon–Sat) with a template matched to each contact type → button taps open live demos (ClassCoach quiz maker, YNeet practice, TestMandi earnings calculator) → "Talk to us" / HELP hands the chat to a person and alerts the owner → automatic follow-ups after 3 and 7 days, then stops → onboarding nudges after demo/trial/payment.
+Safety: auto-pause on WhatsApp spam/limit errors, quality downgrades, or when Stop taps pass LEAD_MAX_STOP_PCT. Replies typed in the WhatsApp Business app pause the bot for that chat (subscribe the app webhook to `smb_message_echoes`). Owner can send REPORT to the bot for a summary; a summary is also sent at 9 AM.

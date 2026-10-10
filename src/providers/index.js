@@ -17,7 +17,7 @@ export function provider() {
 
 export async function send(product, phone, msg) {
   // Template messages can go through AiSensy's Campaign API when its key is set
-  if (msg.type === 'template' && config.aisensy.apiKey && config.provider !== 'sim') {
+  if (msg.type === 'template' && !msg.direct && config.aisensy.apiKey && config.provider !== 'sim') {
     return aisensy.sendTemplate(phone, msg);
   }
   return provider().send(product, phone, clamp(msg));

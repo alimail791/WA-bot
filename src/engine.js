@@ -72,6 +72,7 @@ export async function handleInbound({ product, phone, name = '', text = '', repl
   }
 
   await ctx.track('in', { text: input.text.slice(0, 200), replyId: input.replyId });
+  try { await (await import('./leads.js')).onInbound(phone, product); } catch (e) { console.error('[leads] inbound', e.message); }
   try {
     await flows[product].handle(ctx, input);
   } catch (err) {
@@ -87,6 +88,7 @@ export async function handleInbound({ product, phone, name = '', text = '', repl
 export async function dispatchPaid(order) {
   const ctx = await contextFor(order.product, order.phone);
   if (ctx) await flows[order.product].onPaid(ctx, order);
+  try { await (await import('./leads.js')).onPaid(order); } catch (e) { console.error('[leads] paid', e.message); }
 }
 
 // Called when a web test is submitted

@@ -35,7 +35,11 @@ export function toMeta(phone, m) {
         ...base, type: 'template',
         template: {
           name: m.name, language: { code: m.lang || 'en' },
-          components: m.params?.length ? [{ type: 'body', parameters: m.params.map((t) => ({ type: 'text', text: String(t) })) }] : [],
+          components: [
+            ...(m.params?.length ? [{ type: 'body', parameters: m.params.map((t) => ({ type: 'text', text: String(t) })) }] : []),
+            // Quick-reply buttons: send our own payload so taps come back as e.g. "lead:demo"
+            ...(m.buttons || []).map((payload, i) => ({ type: 'button', sub_type: 'quick_reply', index: String(i), parameters: [{ type: 'payload', payload }] })),
+          ],
         },
       };
     default:
@@ -53,10 +57,25 @@ export async function send(product, phone, m) {
   });
   if (!res.ok) {
     const body = await res.text();
+    if (m.direct) return { ok: false, status: res.status, body };
     console.error(`[wa] send failed ${res.status} to ${phone}: ${body.slice(0, 300)}`);
     return { ok: false, status: res.status, body };
   }
   return { ok: true, ...(await res.json()) };
+}
+
+// Delivery receipts, app echoes (messages typed in the WhatsApp Business app) and quality updates
+export function parseExtras(body) {
+  const out = { statuses: [], echoes: [], quality: [] };
+  for (const entry of body?.entry || []) {
+    for (const change of entry.changes || []) {
+      const v = change.value || {};
+      for (const s of v.statuses || []) out.statuses.push({ id: s.id, status: s.status, recipient: s.recipient_id, errors: s.errors || [] });
+      for (const e of v.message_echoes || []) out.echoes.push({ to: e.to, type: e.type });
+      if (change.field === 'phone_number_quality_update') out.quality.push(v);
+    }
+  }
+  return out;
 }
 
 // Turn a webhook payload into simple inbound events: { phoneNumberId, from, name, text, replyId }
