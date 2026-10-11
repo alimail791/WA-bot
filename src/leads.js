@@ -540,6 +540,10 @@ export async function safetyCheck() {
 // Delivery receipts from WhatsApp
 export async function onStatus(st) {
   if (!st?.recipient) return;
+  if (st.status === 'failed') {
+    const e = st.errors?.[0] || {};
+    console.error(`[wa] delivery failed to ${st.recipient}: ${e.code || '?'} ${e.title || ''} ${e.error_data?.details || e.message || ''}`.trim());
+  }
   const lead = await db.leads.findOne({ phone: st.recipient });
   if (!lead) return;
   if (st.status === 'read' && !lead.readAt && lead.lastMsgId === st.id) await db.leads.updateOne({ phone: lead.phone }, { $set: { readAt: new Date() } });
