@@ -352,8 +352,17 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
     if (!phone) return res.status(400).json({ ok: false, error: 'Enter a 10-digit mobile number' });
     const r = await sendStep({ phone, name: 'Akbar', org: '', segment, product: SEGMENTS[segment].product, stage: 'new' }, Number(req.body?.step) || 0, { test: true });
     let error = '';
-    if (r?.ok === false) { try { error = JSON.parse(r.body).error?.message || r.body; } catch { error = String(r.body || r.status); } }
-    res.json({ ok: r?.ok !== false, error: String(error).slice(0, 300) });
+    if (r?.ok === false) {
+      try {
+        const e = JSON.parse(r.body).error || {};
+        const details = e.error_data?.details || e.error_user_msg || '';
+        error = [e.message, details].filter(Boolean).join(' — ') || r.body;
+      } catch { error = String(r.body || r.status); }
+      const tpl = SEGMENTS[segment].template;
+      console.error(`[leads] test send failed (segment ${segment}, step ${Number(req.body?.step) || 0}, template ${tpl}): ${String(r.body).slice(0, 600)}`);
+      error = `${error} [template: ${['', 'ra_lead_followup', 'ra_lead_final'][Number(req.body?.step) || 0] || tpl}]`;
+    }
+    res.json({ ok: r?.ok !== false, error: String(error).slice(0, 500) });
   });
 
   app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Server error' }); });
