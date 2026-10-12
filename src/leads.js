@@ -470,7 +470,13 @@ export async function sentToday() {
 // Pick who to message next. Follow-ups first (they already know us), then new contacts.
 async function dueLeads(limit, c, now) {
   const out = [];
+  // Leave out anyone WhatsApp asked us to hold back (snoozed) in the query itself, so a run of
+  // snoozed leads at the front of the list can't block everyone behind them.
   const take = async (filter, step, sort = { lastSentAt: 1 }) => {
+    await takeRows({ ...filter, snoozeUntil: { $lte: new Date(now) } }, step, sort);
+    await takeRows({ ...filter, snoozeUntil: { $exists: false } }, step, sort);
+  };
+  const takeRows = async (filter, step, sort) => {
     if (out.length >= limit) return;
     const rows = await db.leads.find(filter, { sort, limit: (limit - out.length) * 2 });
     for (const l of rows) {

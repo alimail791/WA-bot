@@ -293,3 +293,21 @@ test('Template buttons: "Complete payment" resends the pay link, "Join now" send
   await tap(ph, 'live:SSC-GK-101'); await wait(120);
   assert.ok(fresh(ph).some((x) => x.type === 'link' && /\/t\//.test(x.url)), 'magic test link sent');
 });
+
+test('Snoozed leads (WhatsApp held the message back) do not block the leads behind them', async () => {
+  // Park every existing new lead so only this test's leads are in play
+  for (const l of await db.leads.find({ stage: 'new' })) await db.leads.updateOne({ phone: l.phone }, { $set: { stage: 'cold' } });
+  await leads.importLeads(Array.from({ length: 8 }, (_, i) => `93333000${10 + i},S${i},,coaching,X`).join('\n'));
+  // The first six in the list were held back by WhatsApp (131049) and are waiting 4 days
+  for (let i = 0; i < 6; i++) await db.leads.updateOne({ phone: `9193333000${10 + i}` }, { $set: { snoozeUntil: new Date(Date.now() + 4 * DAY) } });
+  // Early in the day each round is small (1 lead), like the live campaign
+  const sentAlready = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(istMidnight()) } });
+  await leads.setCampaign({ running: true, dailyCap: sentAlready + 50, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
+  const r = await leads.campaignTick(istMidnight() + 10 * HOUR);
+  assert.equal(r.batch, 1);
+  assert.ok(r.due >= 1, 'a waiting lead further down the list should be picked: ' + JSON.stringify(r));
+  const picked = await db.leads.find({ phone: { $in: ['919333300016', '919333300017'] } });
+  assert.ok(picked.some((l) => l.stage === 'contacted'));
+  for (let i = 0; i < 6; i++) assert.equal((await db.leads.findOne({ phone: `9193333000${10 + i}` })).stage, 'new');
+  await leads.setCampaign({ running: false });
+});
