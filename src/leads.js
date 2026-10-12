@@ -435,6 +435,7 @@ export async function sendStep(lead, step, { test = false } = {}) {
   const r = await send(lead.product, lead.phone, { type: 'template', name: m.name, lang: TPL_LANG, params: m.params, buttons: m.buttons, direct: true });
   if (test) return r;
   if (r && r.ok === false) {
+    console.error(`[campaign] send failed to ${lead.phone} (step ${step}, ${m.name}): ${String(r.body || r.status).slice(0, 300)}`);
     await log('lead_send_failed', lead.phone, { step, status: r.status, body: String(r.body || '').slice(0, 300) });
     const body = String(r.body || '');
     if (/132001|132000|132012|132015|132016|template/i.test(body)) {
@@ -523,7 +524,8 @@ export async function campaignTick(now = Date.now()) {
       if (r?.ok !== false) sent++;
       if (config.provider !== 'sim') await new Promise((res) => setTimeout(res, 1200));
     }
-    return { sent, batch };
+    const left = await db.leads.count({ stage: 'new' });
+    return { sent, batch, due: due.length, sentToday: c.dailyCap - remaining + sent, dailyCap: c.dailyCap, notYetMessaged: left };
   } finally { ticking = false; }
 }
 
