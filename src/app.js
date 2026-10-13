@@ -331,7 +331,7 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
     const b = req.body || {};
     const patch = {};
     for (const k of ['running', 'sundays']) if (typeof b[k] === 'boolean') patch[k] = b[k];
-    for (const k of ['dailyCap', 'startHour', 'endHour']) if (b[k] !== undefined) patch[k] = Number(b[k]);
+    for (const k of ['dailyCap', 'perRound', 'startHour', 'endHour']) if (b[k] !== undefined) patch[k] = Number(b[k]);
     res.json(await leads.setCampaign(patch));
   });
   app.post('/admin/leads/update', keyed, async (req, res) => {

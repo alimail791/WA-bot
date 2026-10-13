@@ -161,7 +161,7 @@ export async function importLeads(text, { defaultType = '', source = 'import', t
 }
 
 // ---- Settings ----------------------------------------------------------------
-const DEFAULTS = { running: false, dailyCap: 150, startHour: 10, endHour: 19, sundays: false, followupDays: 3, finalDays: 4, pausedReason: '' };
+const DEFAULTS = { running: false, dailyCap: 150, perRound: 10, startHour: 10, endHour: 19, sundays: false, followupDays: 3, finalDays: 4, pausedReason: '' };
 export async function getCampaign() {
   const s = await db.kv.findOne({ key: 'leadCampaign' });
   return { ...DEFAULTS, ...(s?.value || {}) };
@@ -170,6 +170,7 @@ export async function setCampaign(patch) {
   const cur = await getCampaign();
   const next = { ...cur, ...patch };
   next.dailyCap = Math.max(0, Math.min(5000, Math.round(Number(next.dailyCap) || 0)));
+  next.perRound = Math.max(1, Math.min(40, Math.round(Number(next.perRound) || 10)));
   next.startHour = Math.max(0, Math.min(23, Number(next.startHour)));
   next.endHour = Math.max(next.startHour + 1, Math.min(24, Number(next.endHour)));
   if (patch.running === true) next.pausedReason = '';
@@ -513,9 +514,10 @@ export async function campaignTick(now = Date.now()) {
     if (!(await getCampaign()).running) return { skipped: 'paused' };
     const remaining = c.dailyCap - (await sentToday());
     if (remaining <= 0) return { skipped: 'daily cap reached' };
-    // Spread the day's messages evenly across the sending window (ticks every 5 minutes)
+    // Send a fixed number every round (every 5 minutes) until the day's limit is reached.
+    // Near the end of the window, speed up so the day's limit still goes out.
     const ticksLeft = Math.max(1, Math.ceil(((c.endHour * 60) - (hour * 60 + min)) / 5));
-    const batch = Math.min(remaining, Math.max(1, Math.ceil(remaining / ticksLeft)), 40);
+    const batch = Math.min(remaining, Math.max(c.perRound, Math.ceil(remaining / ticksLeft)), 40);
     const due = await dueLeads(batch, c, now);
     let sent = 0;
     for (const { lead, step } of due) {

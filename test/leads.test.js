@@ -302,7 +302,7 @@ test('Snoozed leads (WhatsApp held the message back) do not block the leads behi
   for (let i = 0; i < 6; i++) await db.leads.updateOne({ phone: `9193333000${10 + i}` }, { $set: { snoozeUntil: new Date(Date.now() + 4 * DAY) } });
   // Early in the day each round is small (1 lead), like the live campaign
   const sentAlready = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(istMidnight()) } });
-  await leads.setCampaign({ running: true, dailyCap: sentAlready + 50, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
+  await leads.setCampaign({ running: true, dailyCap: sentAlready + 50, perRound: 1, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
   const r = await leads.campaignTick(istMidnight() + 10 * HOUR);
   assert.equal(r.batch, 1);
   assert.ok(r.due >= 1, 'a waiting lead further down the list should be picked: ' + JSON.stringify(r));
@@ -310,4 +310,16 @@ test('Snoozed leads (WhatsApp held the message back) do not block the leads behi
   assert.ok(picked.some((l) => l.stage === 'contacted'));
   for (let i = 0; i < 6; i++) assert.equal((await db.leads.findOne({ phone: `9193333000${10 + i}` })).stage, 'new');
   await leads.setCampaign({ running: false });
+});
+
+test('Speed: sends the "every 5 minutes" number each round, not a thin spread over the day', async () => {
+  for (const l of await db.leads.find({ stage: 'new' })) await db.leads.updateOne({ phone: l.phone }, { $set: { stage: 'cold' } });
+  await leads.importLeads(Array.from({ length: 20 }, (_, i) => `94444000${10 + i},F${i},,coaching,X`).join('\n'));
+  const sentAlready = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(istMidnight()) } });
+  await leads.setCampaign({ running: true, dailyCap: sentAlready + 150, perRound: 10, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
+  const r = await leads.campaignTick(istMidnight() + 10 * HOUR);
+  assert.equal(r.batch, 10);
+  assert.equal(r.sent, 10);
+  assert.equal((await leads.setCampaign({ perRound: 999 })).perRound, 40);
+  await leads.setCampaign({ running: false, perRound: 10 });
 });
