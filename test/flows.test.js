@@ -675,3 +675,29 @@ test('TestMandi live tests: synced schedule, Live row, link at start, attempt on
   await sync.syncLive([]);
   assert.equal((await db.tests.findOne({ code: t.code })).liveUntil, 0, 'cancelled sessions are cleared');
 });
+
+test('TestMandi enquiries: about, seller pitch and CSV format', async () => {
+  const P = 'testmandi', ph = '919000000700';
+  await say(P, ph, 'Hi');
+  let out = await say(P, ph, 'Please send details');
+  assert.match(textOf(out), /TestMandi\*: mock tests and study material/);
+  assert.match(textOf(out), /Teaching resources/);
+  assert.equal(lastLink(out).url, 'https://testmandi.in');
+  assert.ok(choice(out, 'tm:sell'));
+
+  out = await say(P, ph, 'I want to sell my tests');
+  assert.match(textOf(out), /Sell on TestMandi/);
+  assert.match(textOf(out), /Bulk upload by CSV/);
+  assert.match(textOf(out), /Keep \*\d+%\*/);
+  assert.ok(lastLink(out));
+
+  out = await tap(P, ph, out, 'tm:csv');
+  assert.match(textOf(out), /question, option1, option2, option3, option4, correct, topic, explanation/);
+
+  const more = await tap(P, ph, await say(P, ph, 'Hi'), 'tm:more');
+  const about = await tap(P, ph, more, 'tm:about');
+  assert.match(textOf(about), /mock tests and study material/);
+
+  const evs = await db.events.find({ product: P, phone: ph, type: 'enquiry' });
+  assert.ok(evs.length >= 3);
+});

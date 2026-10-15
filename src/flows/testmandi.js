@@ -24,6 +24,9 @@ const owns = (u, code) => (u.purchases || []).includes(code);
 const priceTag = (p) => (p > 0 ? rupees(p) : 'FREE');
 const LISTED = { type: { $ne: 'bundle' }, listed: { $ne: false } };
 const round2 = (n) => Math.round(n * 100) / 100;
+// Typed enquiry words. JOIN and TEACHER are left out: the shared number routes those to ClassCoach.
+const SELL_WORDS = /\b(SELL|SELLING|UPLOAD|INSTITUTE|COACHING CENT(?:RE|ER)|BULK)\b/;
+const ABOUT_WORDS = /\b(ABOUT|INFO|DETAIL|DETAILS|FEATURE|FEATURES|ENQUIRY|INQUIRY|PRICE|PRICES|PLAN|PLANS|SUBSCRIBE|SUBSCRIPTION|SIGN ?UP|REGISTER|ACCOUNT|HOW (?:DOES|DO|TO))\b/;
 
 // ---- Live tests (synced from testmandi.in scheduled tests) ----
 const liveOpen = (l, now = Date.now()) => now >= l.start && now <= l.start + l.windowMin * 60e3;
@@ -57,6 +60,10 @@ export async function handle(ctx, input) {
   const search = upper.match(/^(?:SEARCH|FIND)\s+(.+)/);
   if (search) return runSearch(ctx, text.slice(text.indexOf(' ') + 1));
   if (state === 'await_search' && text && !replyId) return runSearch(ctx, text);
+  // Enquiries: "details", "price", "how to sign up", "I want to sell my tests", "CSV format" ...
+  if (upper === 'CSV' || upper === 'TEMPLATE' || /\bCSV (FORMAT|TEMPLATE)\b/.test(upper)) return csvHelp(ctx);
+  if (SELL_WORDS.test(upper)) return sellInfo(ctx);
+  if (ABOUT_WORDS.test(upper)) return aboutInfo(ctx);
 
   if (replyId.startsWith('tm:')) {
     const [, cmd, a, b] = replyId.split(':');
@@ -77,6 +84,8 @@ export async function handle(ctx, input) {
     if (cmd === 'refer') return referBuyer(ctx);
     if (cmd === 'sell') return sellInfo(ctx);
     if (cmd === 'sales') return sellerStats(ctx);
+    if (cmd === 'about') return aboutInfo(ctx);
+    if (cmd === 'csv') return csvHelp(ctx);
   }
 
   const pending = await pendingOrder(ctx);
@@ -101,6 +110,7 @@ async function moreMenu(ctx) {
   const r = ctx.cfg.referral;
   await ctx.list('More options', 'Open', [{
     title: 'TestMandi', rows: [
+      { id: 'tm:about', title: 'ℹ️ About TestMandi', description: 'Features, new additions and how to sign up' },
       { id: 'tm:refer', title: '🎁 Refer & earn', description: `Friends get ${rupees(r.friendDiscount)} off, you get ${rupees(r.buyerReward)} per friend` },
       { id: 'tm:search', title: '🔍 Search tests', description: 'Find by exam, subject or teacher' },
       isSeller
@@ -469,8 +479,71 @@ async function myTests(ctx) {
 
 // ---- Sellers ----------------------------------------------------------------
 async function sellInfo(ctx) {
+  await ctx.track('enquiry', { kind: 'seller' });
   const invited = ctx.user.sellerReferredBy ? '\n\n🤝 Your invite is saved. Start selling and your inviter gets a small bonus from TestMandi; your share stays the same.' : '';
-  await ctx.say(`🧑‍🏫 Sell your tests on TestMandi\n• Keep ${Math.round(ctx.cfg.sellerShare * 100)}% of every sale\n• Each test gets a WhatsApp link students can buy from in one tap\n• Instant sale alerts and weekly UPI payouts\n\nSign up as a seller at ${ctx.cfg.webBase}, using this WhatsApp number as your phone so sale alerts reach you here.${invited}`);
+  await ctx.say([
+    '🧑‍🏫 *Sell on TestMandi*',
+    `✅ Keep *${Math.round(ctx.cfg.sellerShare * 100)}%* of every sale, on the website and here on WhatsApp`,
+    '✅ Sell mock tests for NEET, JEE, boards and competitive exams',
+    '✅ 🆕 Sell *teaching resources*: worksheets, notes and slides that students buy and download',
+    '',
+    '*Add hundreds of questions in minutes*',
+    '📄 Bulk upload by CSV (send CSV for the format)',
+    '✨ Generate questions with AI from a topic',
+    '📸 Scan a question paper into an online test',
+    '',
+    '*Latest features*',
+    '🎨 Designed covers for your tests',
+    '⭐ Your own store page: students follow you and rate your tests',
+    '🛒 Cart checkout, so students buy several of your items at once',
+    '🔔 Each test gets a WhatsApp link students buy from in one tap, with instant sale alerts here',
+    '💰 Payouts to your bank or UPI from your seller dashboard',
+    '',
+    'Use this WhatsApp number as your phone when you sign up, so sale alerts reach you here.',
+  ].join('\n') + invited);
+  await ctx.link('Create your seller account on TestMandi:', ctx.cfg.webBase, 'Create account');
+  await ctx.buttons('Need help getting your questions in?', [['tm:csv', '📄 CSV format'], ['tm:browse', '🔎 See tests']]);
+}
+
+async function aboutInfo(ctx) {
+  await ctx.track('enquiry', { kind: 'student' });
+  const tests = await db.tests.find(LISTED);
+  const paid = tests.map((t) => t.price).filter((p) => p > 0);
+  const cats = [...new Set(tests.map((t) => t.category).filter(Boolean))];
+  const r = ctx.cfg.referral;
+  const lines = ['📘 *TestMandi*: mock tests and study material from top teachers', ''];
+  if (tests.length >= 5) lines.push(`✅ *${fmtNum(tests.length)} mock tests*${cats.length ? ` for ${cats.slice(0, 3).join(', ')}${cats.length > 3 ? ' and more' : ''}` : ''}`);
+  if (paid.length) lines.push(`✅ Tests from just *${rupees(Math.min(...paid))}*`);
+  lines.push(
+    `✅ Try ${ctx.cfg.freeSample} free questions before you buy`,
+    '✅ Real exam pattern, explanations for every question and your rank among everyone who took it',
+    '✅ 🆕 *Teaching resources*: notes, worksheets and slides to download',
+    '✅ 🆕 Follow your favourite teachers and see ratings before you buy',
+    '✅ 🆕 Cart: buy several tests and notes in one checkout on the website',
+    `🎁 Refer & earn: friends get ${rupees(r.friendDiscount)} off their first test, you get ${rupees(r.buyerReward)} wallet credit`,
+    '',
+    'Buy and take tests right here on WhatsApp, or create a free account on the website for the cart, teaching resources and the All-Access Pass.',
+  );
+  await ctx.say(lines.join('\n'));
+  await ctx.link('Create your free TestMandi account:', ctx.cfg.webBase, 'Create account');
+  await ctx.buttons('Or start right here:', [['tm:browse', '🔎 Browse tests'], ['tm:sell', '🧑‍🏫 Sell my tests']]);
+}
+
+async function csvHelp(ctx) {
+  await ctx.say([
+    '📄 *Bulk upload by CSV*',
+    'Make a spreadsheet with these 8 columns, one question per row, and save it as CSV:',
+    '',
+    'question, option1, option2, option3, option4, correct, topic, explanation',
+    '',
+    '• correct: A/B/C/D (or 1/2/3/4)',
+    '• Keep each question on one line; put text with commas in "double quotes"',
+    '',
+    'Example row:',
+    'What is the SI unit of resistance?,Ampere,Volt,Ohm,Watt,C,Current Electricity,Resistance is measured in ohms.',
+    '',
+    `Upload it on ${ctx.cfg.webBase} → Seller Studio → + Create test → step 2 (Questions) → Upload CSV.`,
+  ].join('\n'));
 }
 
 async function sellerStats(ctx) {
