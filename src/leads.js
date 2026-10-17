@@ -474,6 +474,7 @@ export async function sentToday(now = Date.now()) {
 // WhatsApp said "too many messages" (130429): don't stop the campaign; put the lead back in the
 // queue (the message never went out) and wait an hour before sending again.
 const RATE_HOLD = 60 * 60e3;
+const MAX_HELD_BACK = Number(env.LEAD_MAX_HELD_BACK || 3); // first try + 2 retries
 async function holdForRateLimit(lead) {
   if (lead) {
     await db.leads.updateOne({ phone: lead.phone }, { $set: { step: Math.max(0, (lead.step || 1) - 1), ...((lead.step || 1) <= 1 ? { stage: 'new' } : {}) } });
@@ -492,8 +493,8 @@ async function dueLeads(limit, c, now) {
   // Leave out anyone WhatsApp asked us to hold back (snoozed) in the query itself, so a run of
   // snoozed leads at the front of the list can't block everyone behind them.
   const take = async (filter, step, sort = { lastSentAt: 1 }) => {
-    await takeRows({ ...filter, snoozeUntil: { $lte: new Date(now) } }, step, sort);
-    await takeRows({ ...filter, snoozeUntil: { $exists: false } }, step, sort);
+    await takeRows({ ...filter, snoozeUntil: { $exists: false } }, step, sort); // fresh first
+    await takeRows({ ...filter, snoozeUntil: { $lte: new Date(now) } }, step, sort); // then retries that are due
   };
   const takeRows = async (filter, step, sort) => {
     if (out.length >= limit) return;
@@ -584,8 +585,15 @@ export async function onStatus(st) {
   await log('lead_failed', lead.phone, { code, title: st.errors?.[0]?.title || '' });
   if (code === 131026) await db.leads.updateOne({ phone: lead.phone }, { $set: { stage: 'invalid', stageAt: new Date() } });
   else if (code === 131049) {
-    // Meta held back a marketing message to protect the user's inbox; try again later without counting it
-    await db.leads.updateOne({ phone: lead.phone }, { $set: { snoozeUntil: new Date(Date.now() + 4 * DAY), step: Math.max(0, (lead.step || 1) - 1), ...(lead.step <= 1 ? { stage: 'new' } : {}) } });
+    // Meta held back a marketing message to protect the user's inbox. Try again in 4 days, at most
+    // twice more; after 3 hold-backs give up on this person so the daily limit goes to fresh leads.
+    const heldBack = await db.events.count({ product: 'leads', type: 'lead_failed', phone: lead.phone, 'data.code': 131049 });
+    if (heldBack >= MAX_HELD_BACK) {
+      const firstMessage = (lead.step || 1) <= 1;
+      await db.leads.updateOne({ phone: lead.phone }, { $set: { stage: firstMessage ? 'heldback' : 'cold', stageAt: new Date(), heldBack } });
+      return;
+    }
+    await db.leads.updateOne({ phone: lead.phone }, { $set: { heldBack, snoozeUntil: new Date(Date.now() + 4 * DAY), step: Math.max(0, (lead.step || 1) - 1), ...(lead.step <= 1 ? { stage: 'new' } : {}) } });
   } else if (code === 130429) await holdForRateLimit(lead);
   else if ([131048, 131056, 368].includes(code)) await pauseForSafety(`WhatsApp error ${code}: ${st.errors?.[0]?.title || 'sending limited'}`);
 }

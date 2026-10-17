@@ -81,10 +81,10 @@ async function loadSummary() {
   $('toggle').onclick = async () => { await api('/admin/leads/campaign', { running: !c.running }); toast(c.running ? 'Paused' : 'Campaign started. Messages go out every 5 minutes in sending hours.'); loadSummary(); };
   $('saveCamp').onclick = async () => { await api('/admin/leads/campaign', { dailyCap: +$('cap').value, perRound: +$('per').value, startHour: +$('sh').value, endHour: +$('eh').value, sundays: $('sun').checked }); toast('Saved'); loadSummary(); };
   $('testBtn').onclick = async () => { try { const r = await api('/admin/leads/test', { phone: $('tPhone').value, segment: $('tSeg').value, step: +$('tStep').value }); toast(r.ok ? 'Sent. Check WhatsApp.' : 'WhatsApp said: ' + (r.error || 'failed')); } catch (e) { toast(e.message); } };
-  const t = s.total, order = [['all', 'Total'], ['fresh', 'Not tried yet'], ['retry', 'Waiting to retry'], ['contacted', 'Contacted, no reply yet'], ['replied', 'Replied'], ['demo', 'Saw demo'], ['trial', 'Trying'], ['customer', 'Customers'], ['cold', 'No reply (done)'], ['lost', 'Stopped / not interested'], ['invalid', 'Not on WhatsApp'], ['hot', '🔥 Hot (included above)']];
+  const t = s.total, order = [['all', 'Total'], ['fresh', 'Not tried yet'], ['retry', 'Waiting to retry'], ['contacted', 'Contacted, no reply yet'], ['replied', 'Replied'], ['demo', 'Saw demo'], ['trial', 'Trying'], ['customer', 'Customers'], ['cold', 'No reply (done)'], ['lost', 'Stopped / not interested'], ['invalid', 'Not on WhatsApp'], ['heldback', 'Held back by WhatsApp 3× (stopped trying)'], ['hot', '🔥 Hot (included above)']];
   t.fresh = (t.new || 0) - (t.retry || 0);
   $('stats').innerHTML = order.map(([k, l]) => '<div class="stat"><b>' + (t[k] || 0) + '</b><span>' + l + '</span></div>').join('') + '<div class="stat"><b>₹' + (t.revenue || 0).toLocaleString('en-IN') + '</b><span>Revenue from leads</span></div>';
-  const cols = ['new', 'contacted', 'replied', 'demo', 'trial', 'customer', 'lost', 'cold', 'invalid'];
+  const cols = ['new', 'contacted', 'replied', 'demo', 'trial', 'customer', 'lost', 'cold', 'invalid', 'heldback'];
   $('segTable').innerHTML = '<tr><th>Type</th><th>Total</th>' + cols.map((c) => '<th>' + c + '</th>').join('') + '</tr>' +
     Object.entries(s.bySeg).map(([k, r]) => '<tr><td>' + esc(SEGS[k]?.label || k) + '</td><td>' + r.all + '</td>' + cols.map((c) => '<td>' + (r[c] || 0) + '</td>').join('') + '</tr>').join('');
 }

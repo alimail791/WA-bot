@@ -354,3 +354,28 @@ test('Daily limit counts the last 24 hours, like WhatsApp does', async () => {
   assert.notEqual(later.skipped, 'daily limit reached (last 24 hours)');
   await leads.setCampaign({ running: false });
 });
+
+test('Held back by WhatsApp 3 times: stop trying that person; fresh leads go before retries', async () => {
+  for (const l of await db.leads.find({ stage: 'new' })) await db.leads.updateOne({ phone: l.phone }, { $set: { stage: 'cold' } });
+  await leads.importLeads('9777700001,H,,coaching,X');
+  const sentAlready = await leads.sentToday();
+  await leads.setCampaign({ running: true, dailyCap: sentAlready + 100, perRound: 1, startHour: 0, endHour: 24, sundays: true, holdUntil: '', pausedReason: '' });
+  let t = Date.now();
+  for (let i = 1; i <= 3; i++) {
+    assert.equal((await leads.campaignTick(t)).sent, 1, 'try ' + i);
+    await leads.onStatus({ recipient: '919777700001', status: 'failed', errors: [{ code: 131049 }] });
+    t += 5 * DAY; // past the 4-day wait
+  }
+  const l = await db.leads.findOne({ phone: '919777700001' });
+  assert.equal(l.stage, 'heldback');
+  for (let i = 0; i < 5; i++) await leads.campaignTick(t + i * 5 * 60e3);
+  assert.equal((await db.leads.findOne({ phone: '919777700001' })).sent, l.sent, 'no 4th try');
+
+  // A retry that is due and a fresh lead: the fresh one goes first
+  await leads.importLeads('9777700002,Retry,,coaching,X\n9777700003,Fresh,,coaching,X');
+  await db.leads.updateOne({ phone: '919777700002' }, { $set: { snoozeUntil: new Date(Date.now() - 60e3), sent: 1 } });
+  await leads.campaignTick(Date.now());
+  assert.equal((await db.leads.findOne({ phone: '919777700003' })).stage, 'contacted');
+  assert.equal((await db.leads.findOne({ phone: '919777700002' })).stage, 'new');
+  await leads.setCampaign({ running: false, perRound: 10 });
+});
