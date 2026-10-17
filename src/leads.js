@@ -173,7 +173,7 @@ export async function setCampaign(patch) {
   next.perRound = Math.max(1, Math.min(40, Math.round(Number(next.perRound) || 10)));
   next.startHour = Math.max(0, Math.min(23, Number(next.startHour)));
   next.endHour = Math.max(next.startHour + 1, Math.min(24, Number(next.endHour)));
-  if (patch.running === true) next.pausedReason = '';
+  if (patch.running === true) { next.pausedReason = ''; next.holdUntil = ''; }
   await db.kv.updateOne({ key: 'leadCampaign' }, { $set: { value: next, updatedAt: new Date() } }, { upsert: true });
   return next;
 }
@@ -445,7 +445,8 @@ export async function sendStep(lead, step, { test = false } = {}) {
       return r;
     }
     if (/131026|1013|recipient|not a valid/i.test(body)) await db.leads.updateOne({ phone: lead.phone }, { $set: { stage: 'invalid', stageAt: new Date() } });
-    if (/131048|131056|130429|80007|368/.test(body)) await pauseForSafety(`WhatsApp is limiting messages (${body.match(/\b(131048|131056|130429|80007|368)\b/)?.[1]})`);
+    if (/\b130429\b/.test(body)) { await holdForRateLimit(lead); return r; }
+    if (/131048|131056|80007|368/.test(body)) await pauseForSafety(`WhatsApp is limiting messages (${body.match(/\b(131048|131056|80007|368)\b/)?.[1]})`);
     return r;
   }
   const id = r?.messages?.[0]?.id || '';
@@ -464,8 +465,25 @@ async function pauseForSafety(reason) {
   await alertOwner(`⏸️ Lead campaign paused for safety: ${reason}. Your number's quality matters more than speed; check the leads page before turning it back on.`);
 }
 
-export async function sentToday() {
-  return db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: istMidnight() } });
+// Meta's messaging limit counts new people messaged in the last 24 hours (rolling), not per calendar
+// day, so the daily cap is checked the same way.
+export async function sentToday(now = Date.now()) {
+  return db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(now - DAY) } });
+}
+
+// WhatsApp said "too many messages" (130429): don't stop the campaign; put the lead back in the
+// queue (the message never went out) and wait an hour before sending again.
+const RATE_HOLD = 60 * 60e3;
+async function holdForRateLimit(lead) {
+  if (lead) {
+    await db.leads.updateOne({ phone: lead.phone }, { $set: { step: Math.max(0, (lead.step || 1) - 1), ...((lead.step || 1) <= 1 ? { stage: 'new' } : {}) } });
+    await db.events.deleteMany({ product: 'leads', type: 'lead_sent', phone: lead.phone, at: { $gte: new Date(Date.now() - DAY) } });
+  }
+  const c = await getCampaign();
+  if (!c.running) return;
+  const already = c.holdUntil && new Date(c.holdUntil).getTime() > Date.now();
+  await setCampaign({ holdUntil: new Date(Date.now() + RATE_HOLD).toISOString() });
+  if (!already) await alertOwner('⏳ WhatsApp says too many messages right now (130429). The campaign will wait 1 hour and continue by itself. Nothing for you to do.');
 }
 
 // Pick who to message next. Follow-ups first (they already know us), then new contacts.
@@ -510,10 +528,11 @@ export async function campaignTick(now = Date.now()) {
     const { hour, min, dow } = istParts(now);
     if (hour < c.startHour || hour >= c.endHour) return { skipped: 'outside hours' };
     if (dow === 0 && !c.sundays) return { skipped: 'sunday' };
+    if (c.holdUntil && new Date(c.holdUntil).getTime() > now) return { skipped: 'waiting after WhatsApp rate limit', until: c.holdUntil };
     await safetyCheck();
     if (!(await getCampaign()).running) return { skipped: 'paused' };
-    const remaining = c.dailyCap - (await sentToday());
-    if (remaining <= 0) return { skipped: 'daily cap reached' };
+    const remaining = c.dailyCap - (await sentToday(now));
+    if (remaining <= 0) return { skipped: 'daily limit reached (last 24 hours)' };
     // Send a fixed number every round (every 5 minutes) until the day's limit is reached.
     // Near the end of the window, speed up so the day's limit still goes out.
     const ticksLeft = Math.max(1, Math.ceil(((c.endHour * 60) - (hour * 60 + min)) / 5));
@@ -533,7 +552,7 @@ export async function campaignTick(now = Date.now()) {
       if (config.provider !== 'sim') await new Promise((res) => setTimeout(res, 1200));
     }
     const left = await db.leads.count({ stage: 'new' });
-    return { sent, batch, due: due.length, sentToday: c.dailyCap - remaining + sent, dailyCap: c.dailyCap, notYetMessaged: left };
+    return { sent, batch, due: due.length, sentLast24h: c.dailyCap - remaining + sent, dailyCap: c.dailyCap, notYetMessaged: left };
   } finally { ticking = false; }
 }
 
@@ -565,7 +584,8 @@ export async function onStatus(st) {
   else if (code === 131049) {
     // Meta held back a marketing message to protect the user's inbox; try again later without counting it
     await db.leads.updateOne({ phone: lead.phone }, { $set: { snoozeUntil: new Date(Date.now() + 4 * DAY), step: Math.max(0, (lead.step || 1) - 1), ...(lead.step <= 1 ? { stage: 'new' } : {}) } });
-  } else if ([131048, 131056, 130429, 368].includes(code)) await pauseForSafety(`WhatsApp error ${code}: ${st.errors?.[0]?.title || 'sending limited'}`);
+  } else if (code === 130429) await holdForRateLimit(lead);
+  else if ([131048, 131056, 368].includes(code)) await pauseForSafety(`WhatsApp error ${code}: ${st.errors?.[0]?.title || 'sending limited'}`);
 }
 
 export async function onQualityUpdate(v) {

@@ -69,7 +69,7 @@ async function loadSummary() {
   $('campBody').className = '';
   $('campBody').innerHTML = \`
     <div class="row"><span class="pill \${c.running ? '' : 'off'}">\${c.running ? '● Running' : '❚❚ Paused'}</span>
-    <span class="grow muted">Sent today: <b>\${s.sentToday}</b> of \${c.dailyCap} · \${c.startHour}:00–\${c.endHour}:00 IST\${c.sundays ? '' : ', Mon–Sat'} · Ready to send: \${s.total.new || 0} new</span>
+    <span class="grow muted">Sent in last 24 h: <b>\${s.sentToday}</b> of \${c.dailyCap}\${c.holdUntil && new Date(c.holdUntil) > new Date() ? ' · ⏳ waiting (WhatsApp rate limit) until ' + new Date(c.holdUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : ''} · \${c.startHour}:00–\${c.endHour}:00 IST\${c.sundays ? '' : ', Mon–Sat'} · Ready to send: \${s.total.new || 0} new</span>
     <button class="\${c.running ? 'danger' : 'primary'}" id="toggle">\${c.running ? 'Pause' : 'Start campaign'}</button></div>
     \${c.pausedReason ? '<div class="banner">⏸️ ' + esc(c.pausedReason) + '</div>' : ''}
     <div class="row" style="margin-top:10px"><label class="muted">Messages per day <input type="number" id="cap" min="0" max="5000" value="\${c.dailyCap}"></label><label class="muted">Every 5 min send <input type="number" id="per" min="1" max="40" value="\${c.perRound}"></label>

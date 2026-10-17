@@ -74,7 +74,7 @@ test('Campaign: paused by default, then sends the right template with button pay
   assert.equal((await leads.campaignTick(istMidnight() + 21 * HOUR)).skipped, 'outside hours');
   const r = await leads.campaignTick(istMidnight() + 18.98 * HOUR); // near the end of the day: whole remaining cap goes out
   assert.equal(r.sent, 2);
-  assert.equal((await leads.campaignTick(istMidnight() + 18.99 * HOUR)).skipped, 'daily cap reached');
+  assert.equal((await leads.campaignTick(istMidnight() + 18.99 * HOUR)).skipped, 'daily limit reached (last 24 hours)');
   const ravi = await db.leads.findOne({ phone: '919443012345' });
   assert.equal(ravi.stage, 'contacted');
   assert.equal(ravi.step, 1);
@@ -301,7 +301,7 @@ test('Snoozed leads (WhatsApp held the message back) do not block the leads behi
   // The first six in the list were held back by WhatsApp (131049) and are waiting 4 days
   for (let i = 0; i < 6; i++) await db.leads.updateOne({ phone: `9193333000${10 + i}` }, { $set: { snoozeUntil: new Date(Date.now() + 4 * DAY) } });
   // Early in the day each round is small (1 lead), like the live campaign
-  const sentAlready = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(istMidnight()) } });
+  const sentAlready = await leads.sentToday();
   await leads.setCampaign({ running: true, dailyCap: sentAlready + 50, perRound: 1, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
   const r = await leads.campaignTick(istMidnight() + 10 * HOUR);
   assert.equal(r.batch, 1);
@@ -315,11 +315,42 @@ test('Snoozed leads (WhatsApp held the message back) do not block the leads behi
 test('Speed: sends the "every 5 minutes" number each round, not a thin spread over the day', async () => {
   for (const l of await db.leads.find({ stage: 'new' })) await db.leads.updateOne({ phone: l.phone }, { $set: { stage: 'cold' } });
   await leads.importLeads(Array.from({ length: 20 }, (_, i) => `94444000${10 + i},F${i},,coaching,X`).join('\n'));
-  const sentAlready = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: new Date(istMidnight()) } });
+  const sentAlready = await leads.sentToday();
   await leads.setCampaign({ running: true, dailyCap: sentAlready + 150, perRound: 10, startHour: 10, endHour: 19, sundays: true, pausedReason: '' });
   const r = await leads.campaignTick(istMidnight() + 10 * HOUR);
   assert.equal(r.batch, 10);
   assert.equal(r.sent, 10);
   assert.equal((await leads.setCampaign({ perRound: 999 })).perRound, 40);
   await leads.setCampaign({ running: false, perRound: 10 });
+});
+
+test('Rate limit (130429): campaign waits an hour and resumes by itself; the lead is queued again', async () => {
+  for (const l of await db.leads.find({ stage: 'new' })) await db.leads.updateOne({ phone: l.phone }, { $set: { stage: 'cold' } });
+  await leads.importLeads('9555500011,R1,,coaching,X\n9555500012,R2,,coaching,X');
+  const sentAlready = await leads.sentToday();
+  await leads.setCampaign({ running: true, dailyCap: sentAlready + 100, perRound: 10, startHour: 0, endHour: 24, sundays: true, pausedReason: '' });
+  const r = await leads.campaignTick(Date.now());
+  assert.equal(r.sent, 2);
+  assert.equal(await leads.sentToday(), sentAlready + 2);
+  await leads.onStatus({ recipient: '919555500011', status: 'failed', errors: [{ code: 130429, title: 'Rate limit hit' }] });
+  const c = await leads.getCampaign();
+  assert.equal(c.running, true, 'not paused');
+  assert.ok(new Date(c.holdUntil) > new Date());
+  const lead = await db.leads.findOne({ phone: '919555500011' });
+  assert.equal(lead.stage, 'new');
+  assert.equal(lead.step, 0);
+  assert.equal(await leads.sentToday(), sentAlready + 1, 'the failed one no longer counts');
+  assert.match((await leads.campaignTick(Date.now())).skipped, /rate limit/);
+  assert.equal((await leads.campaignTick(Date.now() + 61 * 60e3)).sent, 1, 'resumes after the hour');
+  await leads.setCampaign({ running: false });
+});
+
+test('Daily limit counts the last 24 hours, like WhatsApp does', async () => {
+  const sentAlready = await leads.sentToday();
+  await leads.setCampaign({ running: true, dailyCap: sentAlready, startHour: 0, endHour: 24, sundays: true, holdUntil: '' });
+  assert.match((await leads.campaignTick(Date.now())).skipped, /daily limit/);
+  // 25 hours later yesterday's sends no longer count
+  const later = await leads.campaignTick(Date.now() + 25 * HOUR);
+  assert.notEqual(later.skipped, 'daily limit reached (last 24 hours)');
+  await leads.setCampaign({ running: false });
 });
