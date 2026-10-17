@@ -297,10 +297,15 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
     const cnt = (type) => db.events.count({ product: 'leads', type, at: { $gte: since } });
     const [sent, taps, stops, failed] = await Promise.all([cnt('lead_sent'), cnt('lead_tap'), cnt('lead_stop'), cnt('lead_failed')]);
     const read = await db.leads.count({ readAt: { $gte: since } });
+    const fails = await db.events.find({ product: 'leads', type: 'lead_failed', at: { $gte: since } }, { projection: { data: 1 } });
+    const byCode = (codes) => fails.filter((e) => codes.includes(Number(e.data?.code))).length;
+    const failedWhy = { heldBack: byCode([131049]), notOnWhatsApp: byCode([131026]), rateLimit: byCode([130429]) };
+    failedWhy.other = fails.length - failedWhy.heldBack - failedWhy.notOnWhatsApp - failedWhy.rateLimit;
+    const delivered = Math.max(0, sent - fails.length);
     const { bySeg, total } = await leads.funnel();
     res.json({
       campaign: await leads.getCampaign(), sentToday: await leads.sentToday(), bySeg, total,
-      week: { sent, read, taps, stops, failed, stopPct: sent ? Math.round((stops / sent) * 1000) / 10 : 0 },
+      week: { sent, delivered, read, taps, stops, failed: fails.length, failedWhy, stopPct: delivered ? Math.round((stops / delivered) * 1000) / 10 : 0 },
       maxStopPct: Number(process.env.LEAD_MAX_STOP_PCT || 5),
       segments: Object.fromEntries(Object.entries(leads.SEGMENTS).map(([k, v]) => [k, { label: v.label, product: v.product, template: v.template }])),
       team: String(process.env.LEAD_TEAM || 'Akbar,Assistant').split(',').map((s) => s.trim()).filter(Boolean),

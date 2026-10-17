@@ -559,11 +559,13 @@ export async function campaignTick(now = Date.now()) {
 // Pause automatically when too many people say stop, or WhatsApp starts failing messages
 export async function safetyCheck() {
   const since = new Date(Date.now() - 7 * DAY);
-  const sent = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: since } });
+  const attempts = await db.events.count({ product: 'leads', type: 'lead_sent', at: { $gte: since } });
+  const failed = await db.events.count({ product: 'leads', type: 'lead_failed', at: { $gte: since } });
+  const sent = Math.max(0, attempts - failed); // delivered: stops are counted against people who actually got the message
   if (sent < 50) return;
   const stops = await db.events.count({ product: 'leads', type: 'lead_stop', at: { $gte: since } });
   const limitPct = Number(env.LEAD_MAX_STOP_PCT || 5);
-  if ((stops / sent) * 100 > limitPct) await pauseForSafety(`${stops} of ${sent} people (${Math.round((stops / sent) * 100)}%) tapped Stop this week, above the ${limitPct}% limit. Try a better-targeted segment or a softer first message`);
+  if ((stops / sent) * 100 > limitPct) await pauseForSafety(`${stops} of ${sent} people who got the message (${Math.round((stops / sent) * 100)}%) tapped Stop this week, above the ${limitPct}% limit. Try a better-targeted segment or a softer first message`);
 }
 
 // Delivery receipts from WhatsApp
@@ -657,13 +659,15 @@ export async function feedback(phone, score) {
 
 // ---- Reports -------------------------------------------------------------------------------
 export async function funnel() {
-  const all = await db.leads.find({}, { projection: { stage: 1, segment: 1, hot: 1, revenue: 1 } });
+  const all = await db.leads.find({}, { projection: { stage: 1, segment: 1, hot: 1, revenue: 1, sent: 1, snoozeUntil: 1 } });
   const bySeg = {};
   const total = { all: 0, hot: 0, revenue: 0 };
   for (const l of all) {
     const s = (bySeg[l.segment] ||= { all: 0 });
     s.all++; s[l.stage] = (s[l.stage] || 0) + 1;
     total.all++; total[l.stage] = (total[l.stage] || 0) + 1;
+    // "new" leads that were tried before but WhatsApp held the message back: waiting to retry
+    if (l.stage === 'new' && ((l.sent || 0) > 0 || l.snoozeUntil)) { total.retry = (total.retry || 0) + 1; s.retry = (s.retry || 0) + 1; }
     if (l.hot && !['customer', 'lost'].includes(l.stage)) total.hot++;
     total.revenue += l.revenue || 0;
   }
