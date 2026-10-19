@@ -3,7 +3,7 @@
 // or a year, NEET/JEE track monthly or yearly. When a plan ends, existing students stay but no new ones can join.
 // Funnel: Hi → trial → quiz from a topic (or the 3,600-question NEET bank) in seconds → one link for the
 //         class group → auto-graded results in chat → upgrade when the class fills up or the trial ends.
-// Refer & earn ("CREF CODE"): every 2 invited teachers who buy a plan earn the inviter 3 months free.
+// Refer & earn ("CREF CODE"): every 2 invited teachers who buy a plan earn the inviter 2 months free.
 import { db } from '../store.js';
 import { config } from '../config.js';
 import { pickQuestions, getQuestions } from '../questions.js';
@@ -392,7 +392,7 @@ export async function onPaid(ctx, order) {
   await ctx.buttons('What next?', [['cc:new', '✨ Make a quiz'], ['cc:results', '📊 Results'], ['cc:refer', '🎁 Refer & earn']]);
 }
 
-// ---- Refer & earn (classcoach.in rule: every 2 invited teachers who buy → 3 months free) -----
+// ---- Refer & earn (classcoach.in rule: every 2 invited teachers who buy → 2 months free) -----
 async function joinWithInvite(ctx, code) {
   const u = ctx.user;
   const inviter = await db.users.findOne({ product: 'classcoach', refCode: code, role: 'tutor' });
@@ -435,7 +435,7 @@ async function refer(ctx) {
   const link = waLink(config.wa.displayNumbers.classcoach, `Hi CREF ${u.refCode}`);
   const bought = await db.users.count({ product: 'classcoach', referredBy: ctx.phone, firstPlanBought: true });
   const toNext = r.needed - (bought % r.needed);
-  await ctx.say(`🎁 Refer & earn\n• Teachers you invite get a free 1-month trial\n• Every ${r.needed} teachers who buy a plan = ${r.rewardMonths} months free for you\n• No limit: 8 teachers = a full year free\n\nTeachers who bought: ${bought} · ${toNext} more for your next ${r.rewardMonths} free months\n\nForward the message below to teacher friends and groups 👇`);
+  await ctx.say(`🎁 Refer & earn\n• Teachers you invite get a free 1-month trial\n• Every ${r.needed} teachers who buy a plan = ${r.rewardMonths} months free for you\n• No limit: ${r.needed * Math.round(12 / r.rewardMonths)} teachers = a full year free\n\nTeachers who bought: ${bought} · ${toNext} more for your next ${r.rewardMonths} free months\n\nForward the message below to teacher friends and groups 👇`);
   await ctx.say(`I make class quizzes on WhatsApp in seconds with ClassCoach. Students answer from a link, marks come back to me automatically, no app needed. Try it free for a month with my link: ${link || 'message ClassCoach and send CREF ' + u.refCode}`);
 }
 

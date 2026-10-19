@@ -50,7 +50,7 @@ export const products = {
     trialStudents: 10,
     graceStudents: 0, // after the limit, new students wait until the teacher upgrades
     quizSize: 10,
-    referral: { needed: 2, rewardMonths: 3 }, // every 2 invited teachers who buy → 3 months free
+    referral: { needed: 2, rewardMonths: 2 }, // every 2 invited teachers who buy → 2 months free
     plans: {
       starter: { id: 'starter', title: 'Starter · 20 students', price: 499, months: 2, students: 20, track: 'general' },
       growth: { id: 'growth', title: 'Growth · 50 students', price: 999, months: 2, students: 50, track: 'general', best: true },
