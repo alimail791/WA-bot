@@ -503,7 +503,7 @@ test('TestMandi seller referral: inviter earns 5% of the new seller\'s sales', a
   assert.equal((await db.users.findOne({ product: P, phone: teacher })).seller.earnings, 80);
 });
 
-test('ClassCoach referral: every 2 invited teachers who buy = 3 months free', async () => {
+test('ClassCoach referral: every 2 invited teachers who buy = 2 months free', async () => {
   const P = 'classcoach', a = '919000000240';
   await say(P, a, 'Hi', '', 'Ravi');
   const m = await say(P, a, 'REFER');
@@ -518,10 +518,10 @@ test('ClassCoach referral: every 2 invited teachers who buy = 3 months free', as
   const ua = await db.users.findOne({ product: P, phone: a });
   assert.equal(ua.referralRewardsGranted, 1);
   const added = (new Date(ua.trialEndsAt) - trialEnd) / 86400e3;
-  assert.ok(added > 88 && added < 93, 'trial extended by 3 months');
+  assert.ok(added > 57 && added < 63, 'trial extended by 2 months');
   const msgs = textOf(fresh(P, a));
-  assert.match(msgs, /1 more and you get 3 months free/);
-  assert.match(msgs, /3 months added free/);
+  assert.match(msgs, /1 more and you get 2 months free/);
+  assert.match(msgs, /2 months added free/);
 });
 
 test('TestMandi sync: tests, bundles and sellers come from testmandi.in; WhatsApp sales are recorded there', async () => {
