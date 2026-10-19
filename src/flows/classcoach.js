@@ -1,6 +1,6 @@
 // ClassCoach: tutor-first flow. Tutors run their class from WhatsApp; students join with "JOIN CODE".
-// Same plans and rules as classcoach.in: 1-month free trial (10 students), Starter/Growth/Pro for 3 months,
-// NEET/JEE track monthly or yearly. When a plan ends, existing students stay but no new ones can join.
+// Same plans and rules as classcoach.in: 1-month free trial (10 students), Starter/Growth/Pro for 2 months
+// or a year, NEET/JEE track monthly or yearly. When a plan ends, existing students stay but no new ones can join.
 // Funnel: Hi → trial → quiz from a topic (or the 3,600-question NEET bank) in seconds → one link for the
 //         class group → auto-graded results in chat → upgrade when the class fills up or the trial ends.
 // Refer & earn ("CREF CODE"): every 2 invited teachers who buy a plan earn the inviter 3 months free.
@@ -78,7 +78,7 @@ export async function handle(ctx, input) {
     if (cmd === 'send') return sendToClass(ctx);
     if (cmd === 'results') return results(ctx);
     if (cmd === 'remind') return remindPending(ctx);
-    if (cmd === 'plans') return plans(ctx);
+    if (cmd === 'plans') return plans(ctx, a);
     if (cmd === 'buy') return buy(ctx, a);
     if (cmd === 'class') return classInfo(ctx);
     if (cmd === 'more') return ccMore(ctx);
@@ -128,7 +128,7 @@ async function ccMore(ctx) {
     title: 'ClassCoach', rows: [
       { id: 'cc:class', title: '👥 My class', description: 'Join link, students, rename' },
       { id: 'cc:remind', title: '⏰ Remind pending', description: 'Nudge students who haven\'t answered' },
-      { id: 'cc:plans', title: '💎 Plans & prices', description: 'From ₹499 for 3 months' },
+      { id: 'cc:plans', title: '💎 Plans & prices', description: 'From ₹499 for 2 months' },
       { id: 'cc:refer', title: '🎁 Refer & earn', description: `Every ${r.needed} teachers who buy = ${r.rewardMonths} months free` },
       ...switchRows(),
     ],
@@ -152,7 +152,7 @@ async function chooseSubject(ctx) {
 async function chooseTopic(ctx, subject) {
   if (isPackSubject(subject) && !hasNeetPack(ctx.user)) {
     await ctx.say(`🔒 ${subject} is part of the NEET/JEE plans: 3,600+ chapter-wise PCB questions with PYQs from 2016 onwards.`);
-    return plans(ctx);
+    return plans(ctx, 'nj');
   }
   await ctx.setSession({ state: 'await_topic', subject });
   await ctx.buttons(`Type a topic for ${subject}, like "Light" or "Trigonometry".\nOr tap below for mixed questions.`, [['cc:any', 'Any topic']]);
@@ -323,21 +323,38 @@ async function upgradeNudge(tutor, c, full) {
   else if (process.env.TEMPLATE_UPGRADE) await send('classcoach', tutor.phone, { type: 'template', name: process.env.TEMPLATE_UPGRADE, params: [c.title, String(c.students.length)] });
 }
 
-async function plans(ctx) {
+const lengthText = (m) => (m === 12 ? '1 year' : m === 1 ? '1 month' : `${m} months`);
+
+// WhatsApp lists hold at most 10 rows, so the menu shows one category at a time:
+// the teacher's own (from their plan or classcoach.in account), else School & general,
+// with a row to switch to the other category.
+async function plans(ctx, which) {
   const p = ctx.cfg.plans;
   const c = await db.classes.findOne({ tutorPhone: ctx.phone });
   const size = c?.students.length || 0;
-  const fit = (x) => x.students >= Math.max(size, 1) && Object.values(p).filter((y) => y.track === x.track && y.months === x.months && y.students >= Math.max(size, 1)).sort((m, n) => m.students - n.students)[0]?.id === x.id;
-  const rows = Object.values(p).map((x) => ({
-    id: `cc:buy:${x.id}`,
-    title: `${x.best ? '⭐ ' : ''}${x.title}`.slice(0, 24),
-    description: `${rupees(x.price)} for ${x.months === 12 ? '12 months' : x.months === 1 ? '1 month' : `${x.months} months`}${x.months === 12 ? ' · 2 months free' : ''}${x.track === 'neet_jee' ? ' · NEET bank' : ''}${fit(x) && size ? ' · fits your class' : ''}`,
-  }));
-  const head = ['ClassCoach plans (same as classcoach.in)', '• General: Starter, Growth, Pro, each for 3 months', '• NEET/JEE: adds the 3,600-question NEET bank with PYQs'];
+  const known = ctx.user.plan?.track;
+  const track = which === 'nj' ? 'neet_jee' : which === 'gen' ? 'general' : known === 'neet_jee' ? 'neet_jee' : 'general';
+  const list = Object.values(p).filter((x) => x.track === track);
+  const short = Math.min(...list.map((x) => x.months));
+  const fit = (x) => x.students >= Math.max(size, 1) && list.filter((y) => y.months === x.months && y.students >= Math.max(size, 1)).sort((m, n) => m.students - n.students)[0]?.id === x.id;
+  const rows = list.map((x) => {
+    const save = x.months === 12 ? Math.round(list.find((y) => y.students === x.students && y.months === short).price * (12 / short) - x.price) : 0;
+    return {
+      id: `cc:buy:${x.id}`,
+      title: `${x.best ? '⭐ ' : ''}${x.title}`.slice(0, 24),
+      description: `${rupees(x.price)} for ${lengthText(x.months)}${save > 0 ? ` · save ${rupees(save)}` : ''}${x.track === 'neet_jee' ? ' · NEET bank' : ''}${fit(x) && size ? ' · fits your class' : ''}`.slice(0, 72),
+    };
+  });
+  rows.push(track === 'general'
+    ? { id: 'cc:plans:nj', title: '🩺 NEET/JEE plans', description: 'For NEET/JEE coaches · adds the 3,600-question bank' }
+    : { id: 'cc:plans:gen', title: '🏫 School & general', description: 'Plans for school and general tuition' });
+  const head = track === 'general'
+    ? ['ClassCoach plans · School & general (same as classcoach.in)', `• Starter, Growth, Pro: pay every ${short} months, or save with a yearly plan`]
+    : ['ClassCoach plans · NEET/JEE coaches (same as classcoach.in)', '• Monthly or yearly, with the 3,600-question NEET bank and PYQs'];
   if (onTrial(ctx.user)) head.push('', `Your free trial ends in ${trialDaysLeft(ctx.user)} days.`);
   else if (active(ctx.user.plan?.until)) head.push('', `Current plan runs till ${fmtDate(ctx.user.plan.until)}. Buying now adds on top.`);
   if (size) head.push(`Your class: ${size} students.`);
-  await ctx.list(head.join('\n'), 'See plans', [{ title: 'Plans', rows }]);
+  await ctx.list(head.join('\n'), 'See plans', [{ title: track === 'general' ? 'School & general' : 'NEET/JEE', rows }]);
   const f = offerFooter();
   if (f) await ctx.say(`⏳ ${f}`);
 }
@@ -346,7 +363,7 @@ async function buy(ctx, planId) {
   const plan = ctx.cfg.plans[planId];
   if (!plan) return plans(ctx);
   const order = await createOrder({ product: 'classcoach', phone: ctx.phone, item: planId, title: `ClassCoach ${plan.title}`, amount: plan.price, meta: {} });
-  await ctx.link(`${plan.title} · ${rupees(plan.price)} for ${plan.months === 1 ? '1 month' : `${plan.months} months`}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
+  await ctx.link(`${plan.title} · ${rupees(plan.price)} for ${lengthText(plan.months)}\nPay with any UPI app. It turns on right after payment.`, order.link, 'Pay by UPI');
 }
 
 export async function onPaid(ctx, order) {

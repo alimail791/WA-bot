@@ -52,9 +52,12 @@ export const products = {
     quizSize: 10,
     referral: { needed: 2, rewardMonths: 3 }, // every 2 invited teachers who buy → 3 months free
     plans: {
-      starter: { id: 'starter', title: 'Starter · 20 students', price: 499, months: 3, students: 20, track: 'general' },
-      growth: { id: 'growth', title: 'Growth · 50 students', price: 999, months: 3, students: 50, track: 'general', best: true },
-      pro: { id: 'pro', title: 'Pro · 100 students', price: 1999, months: 3, students: 100, track: 'general' },
+      starter: { id: 'starter', title: 'Starter · 20 students', price: 499, months: 2, students: 20, track: 'general' },
+      growth: { id: 'growth', title: 'Growth · 50 students', price: 999, months: 2, students: 50, track: 'general', best: true },
+      pro: { id: 'pro', title: 'Pro · 100 students', price: 1999, months: 2, students: 100, track: 'general' },
+      starter_y: { id: 'starter_y', title: 'Starter 20 · yearly', price: 2499, months: 12, students: 20, track: 'general' },
+      growth_y: { id: 'growth_y', title: 'Growth 50 · yearly', price: 4999, months: 12, students: 50, track: 'general' },
+      pro_y: { id: 'pro_y', title: 'Pro 100 · yearly', price: 9999, months: 12, students: 100, track: 'general' },
       nj20_m: { id: 'nj20_m', title: 'NEET/JEE 20 · monthly', price: 599, months: 1, students: 20, track: 'neet_jee' },
       nj50_m: { id: 'nj50_m', title: 'NEET/JEE 50 · monthly', price: 1199, months: 1, students: 50, track: 'neet_jee' },
       nj100_m: { id: 'nj100_m', title: 'NEET/JEE 100 · monthly', price: 1999, months: 1, students: 100, track: 'neet_jee' },

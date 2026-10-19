@@ -296,9 +296,14 @@ test('ClassCoach: trial allows 10 students, then the class is full until the tut
   assert.match(textOf(extra), /is full right now/);
   m = await say(P, tutor, 'PLANS');
   assert.ok(choice(m, 'Growth · 50 students'));
-  assert.ok(choice(m, 'NEET/JEE 50 · monthly'));
+  assert.ok(choice(m, 'Pro 100 · yearly'));
+  assert.ok(choice(m, '🩺 NEET/JEE plans'));
+  const nj = await tap(P, tutor, m, 'cc:plans:nj');
+  assert.ok(choice(nj, 'NEET/JEE 50 · monthly'));
+  assert.ok(choice(nj, '🏫 School & general'));
+  m = await say(P, tutor, 'PLANS');
   m = await tap(P, tutor, m, 'cc:buy:growth');
-  assert.match(textOf(m), /₹999 for 3 months/);
+  assert.match(textOf(m), /₹999 for 2 months/);
   await payLink(lastLink(m).url);
   m = fresh(P, tutor);
   assert.match(textOf(m), /Growth · 50 students is active till/);
