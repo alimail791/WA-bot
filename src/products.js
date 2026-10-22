@@ -14,6 +14,9 @@ export const products = {
     // NEET pattern: 180 questions, 180 minutes, +4 / −1
     mockPattern: { Physics: 45, Chemistry: 45, Biology: 90 },
     mockMinutes: 180,
+    // Free "NEET score check": a short 30-question test that gives a projected /720 score, an estimated
+    // rank and 3 weak chapters. It is the first thing new students are offered (a 3-hour mock is too big an ask).
+    scoreCheck: { pattern: { Physics: 8, Chemistry: 8, Biology: 14 }, minutes: 35 },
     chapterTestSize: 15,
     pyqTestSize: 30,
     dailyQuizSize: 3,
