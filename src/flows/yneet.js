@@ -14,6 +14,7 @@ import { rupees } from '../products.js';
 import { within24h } from '../engine.js';
 import { chapters, pyqYears } from '../bank.js';
 import * as bridge from '../yneetBridge.js';
+import { alertOwner, handover } from '../leads.js';
 import { startChatQuiz, answerQuestion, bumpStreak, todayCount, offerFooter, pendingOrder, switchRows } from './common.js';
 
 const SUBJECTS = ['Physics', 'Chemistry', 'Biology'];
@@ -65,6 +66,7 @@ export async function handle(ctx, input) {
   const textCmd = {
     QUIZ: 'y:quiz', MOCK: 'y:mock', PLANS: 'y:plans', REPORT: 'y:report', REFER: 'y:refer', PARENT: 'y:parent',
     CHAPTER: 'y:chap', CHAPTERS: 'y:chap', PYQ: 'y:pyq', MISTAKES: 'y:mist', RANK: 'y:board', LEADERBOARD: 'y:board', CLASS: 'y:class', UNLOCK: 'y:plans',
+    SCORE: 'y:score', FREE: 'y:score', 'FREE TEST': 'y:score', 'SCORE CHECK': 'y:score',
   }[upper];
   const cmd = replyId || textCmd || '';
   const [, verb, a, b] = cmd.split(':');
@@ -75,6 +77,8 @@ export async function handle(ctx, input) {
   switch (verb) {
     case 'quiz': return startChatQuiz(ctx, { n: ctx.cfg.dailyQuizSize, tag: 'daily', exclude: undefined });
     case 'mock': return startMock(ctx);
+    case 'score': return startScoreCheck(ctx);
+    case 'call': return handover(ctx.phone, `YNeet student${ctx.user.classLevel ? ` (Class ${ctx.user.classLevel})` : ''} asked for a call${ctx.user.lastScore ? `, score check ${ctx.user.lastScore.score}/720` : ''}`);
     case 'more': return moreMenu(ctx);
     case 'chap': return pickSubject(ctx);
     case 'subj': return listChapters(ctx, a, Number(b) || 0);
@@ -111,7 +115,19 @@ async function setClass(ctx, cls) {
   if (!ctx.cfg.classes.includes(cls)) return askClass(ctx, false);
   await ctx.setUser({ classLevel: cls });
   if (['6th', '7th', '8th', '9th', '10th'].includes(cls)) await ctx.say(`Class ${cls} saved. The question bank follows the NEET (Class 11–12) syllabus, so start with easy questions and chapter practice to build a head start.`);
+  // First time here: lead with the free score check, the strongest reason to try YNeet
+  if (!ctx.user.scoreCheckUsed && !(await access(ctx)).ok && ['11th', '12th', 'Dropper'].includes(cls)) return scoreCheckPitch(ctx);
   return menu(ctx);
+}
+
+async function scoreCheckPitch(ctx) {
+  const sc = ctx.cfg.scoreCheck;
+  const n = Object.values(sc.pattern).reduce((a, b) => a + b, 0);
+  await ctx.buttons(`🎯 Where do you stand for NEET today?\n\nTake the FREE NEET score check: ${n} questions, ${sc.minutes} minutes, real NEET marking.\n\nYou get instantly:\n• Your projected score out of 720\n• Your estimated NEET rank\n• Your 3 weakest chapters to fix first`, [
+    ['y:score', '🎯 Start free test'],
+    ['y:quiz', '📝 3-question quiz'],
+    ['y:more', '⭐ More'],
+  ]);
 }
 
 async function menu(ctx) {
@@ -128,7 +144,7 @@ async function menu(ctx) {
   lines.push('', 'What would you like to do?');
   await ctx.buttons(lines.join('\n'), [
     ['y:quiz', '📝 Daily quiz'],
-    ['y:mock', !acc.ok && !u.freeMockUsed ? '🧪 Free NEET mock' : '🧪 NEET mock'],
+    !acc.ok && !u.scoreCheckUsed ? ['y:score', '🎯 Free score check'] : ['y:mock', !acc.ok && !u.freeMockUsed ? '🧪 Free NEET mock' : '🧪 NEET mock'],
     ['y:more', '⭐ More'],
   ]);
 }
@@ -137,6 +153,7 @@ async function moreMenu(ctx) {
   const u = ctx.user;
   await ctx.list('Choose an option', 'Open', [{
     title: 'YNeet', rows: [
+      { id: 'y:mock', title: '🧪 Full NEET mock', description: `180 questions · 3 hours${!u.freeMockUsed ? ' · first one free' : ''}` },
       { id: 'y:chap', title: '📚 Chapter practice', description: 'Physics, Chemistry, Biology: 98 chapters' },
       { id: 'y:pyq', title: '📜 Previous year papers', description: 'NEET PYQs 2016 onwards' },
       { id: 'y:mist', title: '📌 Revise mistakes', description: `${(u.mistakes || []).length} questions you got wrong` },
@@ -326,6 +343,59 @@ async function startMock(ctx) {
   await ctx.link(`🧪 NEET Mock ${n}\n${qs.length} questions (Physics 45 · Chemistry 45 · Biology 90) · ${ctx.cfg.mockMinutes} min · +4/−1${how === 'free' ? '\nYour free mock 🎁' : how === 'credit' ? '\n🎁 Free premium test used' : ''}\nThe link works for 30 minutes; the timer starts when you open it.`, url, 'Start mock');
 }
 
+// ---- Free NEET score check (short test, the main entry offer) ------------------
+async function startScoreCheck(ctx) {
+  const acc = await access(ctx);
+  if (ctx.user.scoreCheckUsed && !acc.ok) {
+    return ctx.buttons(`You've already taken your free score check${ctx.user.lastScore ? ` (${ctx.user.lastScore.score}/720)` : ''}.\nNext step: a full 180-question NEET mock, or unlock unlimited tests.`, [
+      ['y:mock', ctx.user.freeMockUsed ? '🧪 NEET mock' : '🧪 Free NEET mock'], ['y:buy:trial5d', '₹99 · 5 days'], ['y:call', '📞 Talk to us'],
+    ]);
+  }
+  const sc = ctx.cfg.scoreCheck;
+  const seen = ctx.user.seenQ || [];
+  const qs = [];
+  for (const [subject, n] of Object.entries(sc.pattern)) qs.push(...(await pickQuestions('yneet', n, { subject, exclude: seen })));
+  if (!qs.length) return ctx.say('The score check is being prepared. Please try again soon.');
+  await ctx.setUser({ scoreCheckUsed: true });
+  await ctx.track('score_start', {});
+  const by = Object.entries(sc.pattern).map(([s, n]) => `${s} ${n}`).join(' · ');
+  const url = await createMagicLink({ product: 'yneet', phone: ctx.phone, kind: 'score', ref: 'score-check', title: 'Free NEET score check', qids: qs.map((q) => q._id), durationMin: sc.minutes, ttlMin: 24 * 60 });
+  await ctx.link(`🎯 Free NEET score check\n${qs.length} questions (${by}) · ${sc.minutes} min · +4/−1\nThe timer starts when you open the link. Sit somewhere quiet. Your score, rank estimate and weak chapters come here the moment you submit.`, url, 'Start test');
+}
+
+async function scoreCheckResult(ctx, a, { net, max, wrongAnswers, acc }) {
+  const score = Math.max(0, Math.round((net / max) * 720));
+  await db.attempts.updateOne({ _id: a._id }, { $set: { score720: score } });
+  await ctx.track('score_done', { score });
+  const [lo, hi] = estimateNeetRank(score);
+  const weak = (a.weak || []).slice(0, 3);
+  await ctx.setUser({ lastScore: { score, weak, at: new Date() } });
+  const subj = Object.entries(a.bySubject || {}).map(([s, v]) => `${SUBJ_ICON[s] || ''} ${s}: ${v.correct}/${v.total}`);
+  const lines = [
+    '🎯 Your NEET score check',
+    `Projected score: ${score}/720`,
+    `Estimated rank: ${fmtNum(lo)} – ${fmtNum(hi)}`,
+    `Correct ${a.correct} · Wrong ${wrongAnswers} · Skipped ${a.total - a.answered}`,
+    ...subj,
+  ];
+  if (weak.length) lines.push('', '📌 Fix these first:', ...weak.map((w, i) => `${i + 1}. ${w}`));
+  lines.push('', '(Projection from a 30-question sample, using past NEET score-to-rank trends.)');
+  await ctx.say(lines.join('\n'));
+  if (acc.ok) return ctx.buttons('Next step:', [['y:mist', '📌 Revise mistakes'], ['y:mock', '🧪 Full NEET mock'], ['y:chap', '📚 Chapter tests']]);
+
+  // The offer, tied to the result they just saw
+  const gain = score < 360 ? 'Most students gain 40–80 marks just by fixing their weakest chapters.' : 'At your level, every chapter you fix moves your rank by thousands.';
+  await ctx.buttons(`${gain}\n\n🔓 ₹99 for 5 days: chapter tests on ${weak[0] || 'your weak chapters'}${weak[1] ? `, ${weak[1]}` : ''} and more, unlimited full NEET mocks, PYQ papers and rank tracking.`, [
+    ['y:buy:trial5d', '₹99 · Start 5 days'], ['y:call', '📞 Talk to a mentor'], ['y:plans', 'All plans'],
+  ]);
+
+  // Hand the warm lead to a person while it's hot
+  if (process.env.CALL_ALERTS !== 'off') {
+    const name = ctx.user.name || 'A student';
+    await alertOwner(`📞 Call this student now (just finished the free score check)\n${name} · Class ${ctx.user.classLevel || '?'} · +${ctx.phone}\nScore ${score}/720 · rank ~${fmtNum(lo)}–${fmtNum(hi)}${weak.length ? `\nWeak: ${weak.join(', ')}` : ''}\nCall: tel:+${ctx.phone}\nChat: https://wa.me/${ctx.phone}`, { phone: ctx.phone });
+  }
+}
+
 // Called after a web test is submitted
 export async function onAttempt(ctx, a) {
   await rememberMistakes(ctx, a.wrongIds || [], []);
@@ -333,6 +403,7 @@ export async function onAttempt(ctx, a) {
   const net = Math.max(0, a.correct * 4 - wrongAnswers);
   const max = a.total * 4;
   const acc = await access(ctx);
+  if (a.kind === 'score') return scoreCheckResult(ctx, a, { net, max, wrongAnswers, acc });
 
   if (a.kind === 'mock') {
     const score = Math.round((net / max) * 720);
@@ -423,7 +494,7 @@ export async function onPaid(ctx, order) {
 async function myReport(ctx) {
   const list = await db.attempts.find({ product: 'yneet', phone: ctx.phone }, { sort: { at: -1 }, limit: 6 });
   if (!list.length) return ctx.buttons('No tests yet. Your first full NEET mock is free.', [['y:mock', '🧪 Free NEET mock'], ['y:chap', '📚 Chapter practice']]);
-  const lines = ['📈 Your recent tests', ...list.map((a) => (a.kind === 'mock' ? `${a.title}: ${a.score720 ?? '-'}/720` : `${a.title}: ${a.correct}/${a.total}`))];
+  const lines = ['📈 Your recent tests', ...list.map((a) => (['mock', 'score'].includes(a.kind) ? `${a.title}: ${a.score720 ?? '-'}/720` : `${a.title}: ${a.correct}/${a.total}`))];
   const weak = {};
   for (const a of list) for (const w of a.weak || []) weak[w] = (weak[w] || 0) + 1;
   const top = Object.entries(weak).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([w]) => w);

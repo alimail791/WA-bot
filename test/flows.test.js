@@ -96,12 +96,12 @@ async function yneetUser(ph, cls = '12th', name = 'Student') {
 test('YNeet: class first, daily quiz, free NEET-pattern mock, ₹99 unlock, then unlimited mocks', async () => {
   const P = 'yneet', ph = '919000000001';
   let m = await yneetUser(ph);
-  assert.ok(choice(m, 'Free NEET mock'));
+  assert.ok(choice(m, 'Start free test'), 'new Class 11/12 students are offered the free score check first');
   m = await tap(P, ph, m, 'y:quiz');
   m = await answerChatQuiz(P, ph, m);
   assert.match(textOf(m), /Today's score: 3\/3/);
 
-  m = await tap(P, ph, m, 'y:mock');
+  m = await say(P, ph, 'MOCK');
   const link = lastLink(m);
   assert.match(link.text, /Physics 45 · Chemistry 45 · Biology 90/);
   const { row } = await takeWebTest(link.url, 'half');
@@ -705,4 +705,47 @@ test('TestMandi enquiries: about, seller pitch and CSV format', async () => {
 
   const evs = await db.events.find({ product: P, phone: ph, type: 'enquiry' });
   assert.ok(evs.length >= 3);
+});
+
+test('YNeet: free score check gives score, rank and weak chapters, offers ₹99, alerts the owner, follows up once', async () => {
+  const P = 'yneet', ph = '919000000077', owner = '919443424064';
+  process.env.OWNER_PHONES = owner;
+  await say(P, owner, 'Hi'); // owner messaged recently, so alerts can be sent as free text
+  fresh(P, owner);
+  let m = await yneetUser(ph, 'Dropper', 'Priya Nair');
+  assert.match(textOf(m), /FREE NEET score check/);
+  m = await tap(P, ph, m, 'y:score');
+  const link = lastLink(m);
+  assert.match(link.text, /30 questions/);
+  const { row } = await takeWebTest(link.url, 'half');
+  assert.equal(row.qids.length, 30);
+  m = fresh(P, ph);
+  assert.match(textOf(m), /Projected score: \d+\/720/);
+  assert.match(textOf(m), /Estimated rank:/, 'the score check shows the rank for free');
+  assert.ok(choice(m, '₹99'));
+  assert.ok(choice(m, 'Talk to a mentor'));
+  const alert = textOf(fresh(P, owner));
+  assert.match(alert, /Call this student now/);
+  assert.match(alert, /Priya Nair · Class Dropper · \+919000000077/);
+
+  // Only one free score check
+  m = await say(P, ph, 'SCORE');
+  assert.match(textOf(m), /already taken your free score check/);
+  // The menu now leads with the mock instead
+  m = await say(P, ph, 'MENU');
+  assert.ok(choice(m, 'y:mock'));
+
+  // Follow-up 2–4 hours later, once
+  const { scoreCheckFollowup } = await import('../src/nudges.js');
+  const later = Date.now() + 2.5 * 3600e3;
+  assert.equal(await scoreCheckFollowup(later), 1);
+  m = fresh(P, ph);
+  assert.match(textOf(m), /Your score check said \d+\/720/);
+  assert.equal(await scoreCheckFollowup(later), 0);
+
+  // Asking for a mentor hands the chat to a person
+  m = await tap(P, ph, m, 'y:call');
+  assert.match(textOf(m), /will message you here personally/);
+  assert.match(textOf(fresh(P, owner)), /Hot lead/);
+  delete process.env.OWNER_PHONES;
 });

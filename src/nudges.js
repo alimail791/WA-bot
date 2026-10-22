@@ -23,6 +23,11 @@ export async function nudgeAbandonedOrders(now = Date.now()) {
     if (paid) continue;
     await send(o.product, o.phone, { type: 'link', text: `Your ${o.title} is waiting 🙂\n${rupees(o.amount)} · pay with any UPI app and it unlocks instantly.\nQuestions? Just reply here.`, url: o.link, label: 'Finish payment' });
     sent++;
+    // A person who tapped Pay but stopped is the warmest lead there is: tell the owner to call
+    if (process.env.CALL_ALERTS !== 'off') {
+      const { alertOwner } = await import('./leads.js');
+      await alertOwner(`💸 Tapped Pay but didn't finish: ${o.title} · ${rupees(o.amount)}\n${u.name || 'Customer'}${u.classLevel ? ` · Class ${u.classLevel}` : ''} · +${o.phone}${u.lastScore ? `\nScore check: ${u.lastScore.score}/720` : ''}\nA 2-minute call usually closes this. Call: tel:+${o.phone}\nChat: https://wa.me/${o.phone}`, { phone: o.phone });
+    }
   }
   return sent;
 }
@@ -42,6 +47,29 @@ export async function nudgeUnpaidNextDay(now = Date.now()) {
 ${rupees(o.amount)} · pay with any UPI app and it unlocks instantly.`, url: o.link, label: 'Complete payment' });
     else if (T('TEMPLATE_PAYMENT_REMINDER')) await send(o.product, o.phone, { type: 'template', name: T('TEMPLATE_PAYMENT_REMINDER'), params: [o.title, rupees(o.amount)], buttons: [`pay:${o._id}`], direct: true });
     else continue;
+    sent++;
+  }
+  return sent;
+}
+
+// 1c) YNeet: one follow-up 2–4 hours after the free score check, for students who didn't buy.
+// Free message inside the 24-hour window only; nothing is sent outside it.
+export async function scoreCheckFollowup(now = Date.now()) {
+  const users = await db.users.find({ product: 'yneet', 'lastScore.at': { $lte: new Date(now - 2 * HOUR), $gte: new Date(now - 4 * HOUR) }, scoreNudged: { $ne: true }, optedOut: { $ne: true } });
+  let sent = 0;
+  for (const u of users) {
+    await db.users.updateOne({ _id: u._id }, { $set: { scoreNudged: true } });
+    if (u.plan?.until && new Date(u.plan.until) > new Date(now)) continue;
+    if (!within24h(u)) continue;
+    const paid = await db.orders.count({ product: 'yneet', phone: u.phone, status: 'paid', amount: { $gt: 0 } });
+    if (paid) continue;
+    const { score, weak = [] } = u.lastScore;
+    const first = weak[0] ? `"${weak[0]}"` : 'your weakest chapter';
+    await send('yneet', u.phone, {
+      type: 'buttons',
+      text: `Your score check said ${score}/720. The quickest marks are in ${first}.\n\nWith 5-day access (₹99) you can take a chapter test on it today, see every explanation, and re-check your score with a full mock this week.`,
+      buttons: [{ id: 'y:buy:trial5d', title: '₹99 · Start 5 days' }, { id: 'y:call', title: '📞 Talk to a mentor' }],
+    });
     sent++;
   }
   return sent;
@@ -104,6 +132,7 @@ export function startCron() {
   cron.schedule('*/10 * * * *', safe('abandoned', nudgeAbandonedOrders), tz);
   cron.schedule('7 * * * *', safe('unpaid-next-day', nudgeUnpaidNextDay), tz);
   cron.schedule('*/3 * * * *', safe('payment-sync', async () => (await import('./payments.js')).syncRecentOrders()), tz);
+  cron.schedule('*/15 * * * *', safe('score-followup', scoreCheckFollowup), tz);
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);

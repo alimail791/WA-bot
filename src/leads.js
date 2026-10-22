@@ -227,7 +227,7 @@ export async function onAppEcho(to) {
   if (lead) await db.leads.updateOne({ phone: to }, { $set: { lastHumanAt: new Date() } });
 }
 
-async function handover(phone, why) {
+export async function handover(phone, why) {
   const lead = await db.leads.findOne({ phone });
   await setHuman(phone, 24);
   if (lead) await db.leads.updateOne({ phone }, { $set: { hot: true, hotAt: new Date(), hotWhy: why } });
