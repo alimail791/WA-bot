@@ -384,7 +384,7 @@ async function scoreCheckResult(ctx, a, { net, max, wrongAnswers, acc }) {
   if (acc.ok) return ctx.buttons('Next step:', [['y:mist', '📌 Revise mistakes'], ['y:mock', '🧪 Full NEET mock'], ['y:chap', '📚 Chapter tests']]);
 
   // The offer, tied to the result they just saw
-  const gain = score < 360 ? 'Most students gain 40–80 marks just by fixing their weakest chapters.' : 'At your level, every chapter you fix moves your rank by thousands.';
+  const gain = score < 360 ? 'Your weakest chapters are where the quickest marks are. Fix them first.' : 'At your level, small mistakes in a few chapters decide your rank. Fix those first.';
   await ctx.buttons(`${gain}\n\n🔓 ₹99 for 5 days: chapter tests on ${weak[0] || 'your weak chapters'}${weak[1] ? `, ${weak[1]}` : ''} and more, unlimited full NEET mocks, PYQ papers and rank tracking.`, [
     ['y:buy:trial5d', '₹99 · Start 5 days'], ['y:call', '📞 Talk to a mentor'], ['y:plans', 'All plans'],
   ]);
