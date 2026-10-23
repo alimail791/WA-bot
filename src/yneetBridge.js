@@ -53,7 +53,7 @@ export async function lookup(phone) {
   return value;
 }
 
-/** Write a WhatsApp purchase into the student's YNeet subscription. planKey: TRIAL_5D | MONTHLY */
+/** Write a WhatsApp purchase into the student's YNeet subscription. planKey: TRIAL_30D | MONTHLY */
 export async function grant({ phone, planKey, start, end, amountPaise, paymentId }) {
   if (impl) return impl.grant({ phone, planKey, start, end, amountPaise, paymentId });
   if (!enabled()) return false;

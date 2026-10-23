@@ -67,8 +67,8 @@ export async function scoreCheckFollowup(now = Date.now()) {
     const first = weak[0] ? `"${weak[0]}"` : 'your weakest chapter';
     await send('yneet', u.phone, {
       type: 'buttons',
-      text: `Your score check said ${score}/720. The quickest marks are in ${first}.\n\nWith 5-day access (₹99) you can take a chapter test on it today, see every explanation, and re-check your score with a full mock this week.`,
-      buttons: [{ id: 'y:buy:trial5d', title: '₹99 · Start 5 days' }, { id: 'y:call', title: '📞 Talk to a mentor' }],
+      text: `Your score check said ${score}/720. The quickest marks are in ${first}.\n\nStart your free 30-day trial and take a chapter test on it today, see every explanation, and re-check your score with a full mock this week.`,
+      buttons: [{ id: 'y:buy:trial30d', title: '🎁 30 days free' }, { id: 'y:call', title: '📞 Talk to a mentor' }],
     });
     sent++;
   }

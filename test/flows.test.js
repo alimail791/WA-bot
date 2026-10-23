@@ -93,7 +93,7 @@ async function yneetUser(ph, cls = '12th', name = 'Student') {
   return say('yneet', ph, '', `y:cls:${cls}`);
 }
 
-test('YNeet: class first, daily quiz, free NEET-pattern mock, ₹99 unlock, then unlimited mocks', async () => {
+test('YNeet: class first, daily quiz, free NEET-pattern mock, free 30-day trial, then unlimited mocks', async () => {
   const P = 'yneet', ph = '919000000001';
   let m = await yneetUser(ph);
   assert.ok(choice(m, 'Start free test'), 'new Class 11/12 students are offered the free score check first');
@@ -109,13 +109,12 @@ test('YNeet: class first, daily quiz, free NEET-pattern mock, ₹99 unlock, then
   m = fresh(P, ph);
   assert.match(textOf(m), /Score: \d+\/720/);
   assert.doesNotMatch(textOf(m), /Estimated rank/, 'rank estimate is a paid feature');
-  m = await tap(P, ph, m, 'y:buy:trial5d');
-  assert.match(textOf(m), /₹99/);
-  await payLink(lastLink(m).url);
-  m = fresh(P, ph);
-  assert.match(textOf(m), /Full access till/);
+  m = await tap(P, ph, m, 'y:buy:trial30d');
+  assert.match(textOf(m), /30-day free trial is on/);
+  assert.ok(!lastLink(m) || !/pay/i.test(lastLink(m).url), 'no payment for the trial');
   const u = await db.users.findOne({ product: P, phone: ph });
-  assert.ok(new Date(u.plan.until) - Date.now() > 4.9 * 86400e3);
+  assert.ok(new Date(u.plan.until) - Date.now() > 29.9 * 86400e3);
+  assert.equal(u.trialUsed, true);
   assert.ok(u.mistakes.length > 0, 'wrong answers from the mock are saved');
   m = await say(P, ph, 'MOCK');
   assert.ok(lastLink(m), 'plan holders get unlimited mocks');
@@ -133,6 +132,37 @@ test('YNeet: monthly price follows the class, ends at month end', async () => {
   const until = new Date(u.plan.until);
   const ist = new Date(until.getTime() + 5.5 * 3600e3 + 2000);
   assert.equal(ist.getUTCDate(), 1, 'access ends at the last second of the month (IST)');
+});
+
+test('YNeet: buy several months at once; early renewal adds after the current plan', async () => {
+  const P = 'yneet', ph = '919000000017';
+  await yneetUser(ph, 'Dropper');
+  let m = await say(P, ph, 'PLANS');
+  assert.ok(choice(m, '30-day free trial'), 'trial offered before it is used');
+  assert.ok(choice(m, '6 months · ₹3,600') || choice(m, '6 months · ₹3600'), 'multi-month rows priced N × monthly');
+  m = await say(P, ph, '', 'y:buy:m3');
+  assert.match(textOf(m), /3 months \(Class Dropper\)/);
+  await payLink(lastLink(m).url);
+  let u = await db.users.findOne({ product: P, phone: ph });
+  const first = new Date(u.plan.until);
+  const istNow = new Date(Date.now() + 5.5 * 3600e3), istEnd = new Date(first.getTime() + 5.5 * 3600e3);
+  const monthsAhead = (istEnd.getUTCFullYear() - istNow.getUTCFullYear()) * 12 + istEnd.getUTCMonth() - istNow.getUTCMonth();
+  assert.equal(monthsAhead, 2, '3 months = this month + 2 more');
+  m = await say(P, ph, '', 'y:buy:monthly');
+  await payLink(lastLink(m).url);
+  u = await db.users.findOne({ product: P, phone: ph });
+  const second = new Date(new Date(u.plan.until).getTime() + 5.5 * 3600e3);
+  assert.equal((second.getUTCFullYear() - istEnd.getUTCFullYear()) * 12 + second.getUTCMonth() - istEnd.getUTCMonth(), 1, 'one more month after the current end');
+});
+
+test('YNeet: the free trial works only once', async () => {
+  const P = 'yneet', ph = '919000000008';
+  await yneetUser(ph);
+  await say(P, ph, '', 'y:buy:trial30d');
+  await db.users.updateOne({ product: P, phone: ph }, { $set: { 'plan.until': new Date(Date.now() - 1000) } });
+  const m = await say(P, ph, '', 'y:buy:trial5d');
+  assert.match(textOf(m), /already been used/);
+  assert.doesNotMatch(JSON.stringify(m), /y:buy:trial30d/, 'trial no longer offered');
 });
 
 test('YNeet: chapter practice, free daily chapter test, PYQ needs a plan', async () => {
@@ -204,7 +234,7 @@ test('YNeet bridge: web subscribers get access on WhatsApp; WhatsApp purchases u
   const bridge = await import('../src/yneetBridge.js');
   const granted = [];
   bridge.setImpl({
-    lookup: async (phone) => (phone === '919000000020' ? { userId: 'u1', classLevel: '11th', active: true, endDate: new Date(Date.now() + 9 * 86400e3) } : { userId: 'u2', classLevel: '12th', active: false }),
+    lookup: async (phone) => (phone === '919000000020' ? { userId: 'u1', classLevel: '11th', active: true, endDate: new Date(Date.now() + 9 * 86400e3) } : { userId: 'u2', classLevel: '12th', active: false, plan: 'NONE' }),
     grant: async (g) => { granted.push(g); return true; },
   });
   try {
@@ -215,12 +245,11 @@ test('YNeet bridge: web subscribers get access on WhatsApp; WhatsApp purchases u
     m = await say(P, '919000000020', '', 'y:yr:2023');
     assert.ok(lastLink(m), 'web plan unlocks PYQ papers on WhatsApp');
     await yneetUser('919000000021');
-    m = await say(P, '919000000021', '', 'y:buy:trial5d');
-    await payLink(lastLink(m).url);
+    m = await say(P, '919000000021', '', 'y:buy:trial30d');
     assert.equal(granted.length, 1);
-    assert.equal(granted[0].planKey, 'TRIAL_5D');
-    assert.equal(granted[0].amountPaise, 9900);
-    assert.match(textOf(fresh(P, '919000000021')), /app\.yneet\.in account is unlocked too/);
+    assert.equal(granted[0].planKey, 'TRIAL_30D');
+    assert.equal(granted[0].amountPaise, 0);
+    assert.match(textOf(m), /app\.yneet\.in account is unlocked too/);
   } finally { bridge.setImpl(null); }
 });
 
@@ -328,7 +357,7 @@ test('ClassCoach: NEET bank subjects need the trial or a NEET/JEE plan', async (
 test('Unfinished payment gets one reminder', async () => {
   const P = 'yneet', ph = '919000000060';
   await yneetUser(ph);
-  const m = await say(P, ph, '', 'y:buy:trial5d');
+  const m = await say(P, ph, '', 'y:buy:monthly');
   assert.ok(lastLink(m));
   const order = await db.orders.findOne({ product: P, phone: ph, status: 'created' });
   await db.orders.updateOne({ _id: order._id }, { $set: { createdAt: new Date(Date.now() - 40 * 60e3) } });
@@ -707,7 +736,7 @@ test('TestMandi enquiries: about, seller pitch and CSV format', async () => {
   assert.ok(evs.length >= 3);
 });
 
-test('YNeet: free score check gives score, rank and weak chapters, offers ₹99, alerts the owner, follows up once', async () => {
+test('YNeet: free score check gives score, rank and weak chapters, offers the free trial, alerts the owner, follows up once', async () => {
   const P = 'yneet', ph = '919000000077', owner = '919443424064';
   process.env.OWNER_PHONES = owner;
   await say(P, owner, 'Hi'); // owner messaged recently, so alerts can be sent as free text
@@ -722,7 +751,7 @@ test('YNeet: free score check gives score, rank and weak chapters, offers ₹99,
   m = fresh(P, ph);
   assert.match(textOf(m), /Projected score: \d+\/720/);
   assert.match(textOf(m), /Estimated rank:/, 'the score check shows the rank for free');
-  assert.ok(choice(m, '₹99'));
+  assert.ok(choice(m, '30 days free'));
   assert.ok(choice(m, 'Talk to a mentor'));
   const alert = textOf(fresh(P, owner));
   assert.match(alert, /Call this student now/);

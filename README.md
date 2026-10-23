@@ -9,8 +9,8 @@ Students, buyers and tutors use it from WhatsApp with no app and no login: their
 |---|---|---|---|
 | Who chats | NEET student | Test buyer (seller gets alerts) | Tutor; students join by link |
 | Entry | `Hi`, ads, `Hi REF CODE` from a friend | `TEST CODE` from a seller's share link | `Hi` (tutor), `JOIN CODE` (student) |
-| Free hook | Daily quiz, quick chapter practice, 1 free NEET mock, 1 chapter test a day | 5 free sample questions, free tests | 1-month free trial, 10 students |
-| Paid | ₹99 for 5 days · Monthly by class (₹300–₹600, till month end), same as app.yneet.in | Test price (seller keeps 80%, same as testmandi.in) · bundles | Starter ₹499 · Growth ₹999 · Pro ₹1,999 (2 months, or ₹2,499 / ₹4,999 / ₹9,999 a year) · NEET/JEE ₹599–₹1,999 a month or yearly, same as classcoach.in |
+| Free hook | 30-day free trial, daily quiz, quick chapter practice, 1 free NEET mock, 1 chapter test a day | 5 free sample questions, free tests | 1-month free trial, 10 students |
+| Paid | 30 days free once, then monthly by class (₹300–₹600 a month, 1–12 months at a time, each to month end), same as app.yneet.in | Test price (seller keeps 80%, same as testmandi.in) · bundles | Starter ₹499 · Growth ₹999 · Pro ₹1,999 (2 months, or ₹2,499 / ₹4,999 / ₹9,999 a year) · NEET/JEE ₹599–₹1,999 a month or yearly, same as classcoach.in |
 | Brings people back | Streaks, 7 PM reminder, referral credits, Sunday parent report | Rank among buyers, rating, seller's pack and other tests | Results as they arrive, reminders, upgrade when class grows |
 
 ### Built-in sales tactics

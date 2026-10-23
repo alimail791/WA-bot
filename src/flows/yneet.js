@@ -1,6 +1,6 @@
 // YNeet on WhatsApp — the NEET question bank shared with app.yneet.in, with the same plans and prices.
 // Free: daily 3-question quiz, quick chapter practice in chat, 1 full NEET mock, 1 chapter test a day.
-// Paid (₹99 for 5 days, or monthly by class till month-end): unlimited NEET-pattern mocks, chapter tests,
+// Free 30-day trial once, then monthly by class (1 to 12 months at a time, each to month-end): unlimited NEET-pattern mocks, chapter tests,
 // PYQ papers, full analysis with estimated rank. Web subscribers on app.yneet.in are recognised by phone.
 // Habit and growth: streaks, mistake revision, weekly leaderboard, parent reports, referrals.
 import { db } from '../store.js';
@@ -30,6 +30,15 @@ export function endOfMonthIST(from = new Date()) {
   return new Date(end);
 }
 const monthlyPrice = (cfg, cls) => cfg.monthlyByClass[cls] ?? cfg.monthlyByClass['12th'];
+// End of the (n-1)th month after `from`, India time: n=1 → this month's end, n=3 → end of the month after next.
+export function monthsEndIST(from, n = 1) {
+  const ist = new Date(from.getTime() + 5.5 * 3600e3);
+  const firstOfTarget = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() + (n - 1), 1) - 5.5 * 3600e3);
+  return endOfMonthIST(firstOfTarget);
+}
+// New months start the second after an active plan ends, so buying early never loses days.
+const planStart = (u) => (active(u.plan?.until) ? new Date(new Date(u.plan.until).getTime() + 1000) : new Date());
+const monthsLabel = (n) => `${n} month${n > 1 ? 's' : ''}`;
 
 async function access(ctx) {
   const u = ctx.user;
@@ -159,7 +168,7 @@ async function moreMenu(ctx) {
       { id: 'y:mist', title: '📌 Revise mistakes', description: `${(u.mistakes || []).length} questions you got wrong` },
       { id: 'y:report', title: '📈 My progress', description: 'Scores and weak chapters' },
       { id: 'y:board', title: '🏆 Leaderboard', description: 'This week\'s top mock scores' },
-      { id: 'y:plans', title: '💎 Plans & prices', description: `₹99 for 5 days · Monthly ${rupees(monthlyPrice(ctx.cfg, u.classLevel))}` },
+      { id: 'y:plans', title: '💎 Plans & prices', description: `${u.trialUsed ? '' : '30 days free · '}Then ${rupees(monthlyPrice(ctx.cfg, u.classLevel))}/month` },
       { id: 'y:refer', title: '👥 Invite friends', description: 'Free tests and a free month' },
       { id: 'y:parent', title: '👪 Parent report', description: 'Weekly progress to your parent' },
       { id: 'y:remind', title: '⏰ Daily 7 PM quiz', description: 'Keep your streak going' },
@@ -348,7 +357,7 @@ async function startScoreCheck(ctx) {
   const acc = await access(ctx);
   if (ctx.user.scoreCheckUsed && !acc.ok) {
     return ctx.buttons(`You've already taken your free score check${ctx.user.lastScore ? ` (${ctx.user.lastScore.score}/720)` : ''}.\nNext step: a full 180-question NEET mock, or unlock unlimited tests.`, [
-      ['y:mock', ctx.user.freeMockUsed ? '🧪 NEET mock' : '🧪 Free NEET mock'], ['y:buy:trial5d', '₹99 · 5 days'], ['y:call', '📞 Talk to us'],
+      ['y:mock', ctx.user.freeMockUsed ? '🧪 NEET mock' : '🧪 Free NEET mock'], ['y:buy:trial30d', '🎁 30 days free'], ['y:call', '📞 Talk to us'],
     ]);
   }
   const sc = ctx.cfg.scoreCheck;
@@ -385,8 +394,8 @@ async function scoreCheckResult(ctx, a, { net, max, wrongAnswers, acc }) {
 
   // The offer, tied to the result they just saw
   const gain = score < 360 ? 'Your weakest chapters are where the quickest marks are. Fix them first.' : 'At your level, small mistakes in a few chapters decide your rank. Fix those first.';
-  await ctx.buttons(`${gain}\n\n🔓 ₹99 for 5 days: chapter tests on ${weak[0] || 'your weak chapters'}${weak[1] ? `, ${weak[1]}` : ''} and more, unlimited full NEET mocks, PYQ papers and rank tracking.`, [
-    ['y:buy:trial5d', '₹99 · Start 5 days'], ['y:call', '📞 Talk to a mentor'], ['y:plans', 'All plans'],
+  await ctx.buttons(`${gain}\n\n🎁 Free for 30 days: chapter tests on ${weak[0] || 'your weak chapters'}${weak[1] ? `, ${weak[1]}` : ''} and more, unlimited full NEET mocks, PYQ papers and rank tracking.`, [
+    ['y:buy:trial30d', '🎁 30 days free'], ['y:call', '📞 Talk to a mentor'], ['y:plans', 'All plans'],
   ]);
 
   // Hand the warm lead to a person while it's hot
@@ -421,7 +430,7 @@ export async function onAttempt(ctx, a) {
     }
     if (a.weak?.[0]) lines.push(`Weakest chapter: ${a.weak[0]}`);
     await ctx.say(lines.join('\n'));
-    return ctx.buttons(`🔓 Unlock your estimated NEET rank, chapter-wise revision list and unlimited mocks: ₹99 for 5 days.`, [['y:buy:trial5d', '₹99 · 5 days'], ['y:plans', 'All plans'], ['y:mist', '📌 Revise mistakes']]);
+    return ctx.buttons(`🔓 Unlock your estimated NEET rank, chapter-wise revision list and unlimited mocks: free for 30 days.`, [['y:buy:trial30d', '🎁 30 days free'], ['y:plans', 'All plans'], ['y:mist', '📌 Revise mistakes']]);
   }
 
   // Chapter and PYQ tests
@@ -443,29 +452,56 @@ async function showPlans(ctx) {
   const acc = await access(ctx);
   const head = [`💎 YNeet full access (same plans as app.yneet.in)`, '• Unlimited NEET-pattern mocks (180 Qs)', '• Every chapter test and PYQ paper', '• Estimated rank and revision list', '• Weekly parent report'];
   if (acc.ok) head.push('', `✅ You have full access till ${fmtDate(acc.until)}.`);
-  await ctx.list(head.join('\n'), 'See plans', [{
-    title: 'Plans', rows: [
-      { id: 'y:buy:trial5d', title: `${t.title} · ${rupees(t.price)}`, description: 'Try everything for 5 days' },
-      { id: 'y:buy:monthly', title: `⭐ Monthly · ${rupees(m)}`, description: `Class ${cls} price · till ${fmtDate(endOfMonthIST())}` },
-    ],
-  }]);
+  const start = planStart(u);
+  const rows = [];
+  if (!u.trialUsed && !acc.ok) rows.push({ id: 'y:buy:trial30d', title: `🎁 ${t.title}`, description: `Everything free for ${t.days} days, no payment` });
+  for (const n of ctx.cfg.monthOptions || [1]) {
+    rows.push({ id: n === 1 ? 'y:buy:monthly' : `y:buy:m${n}`, title: `${n === 1 ? '⭐ Monthly' : `⭐ ${monthsLabel(n)}`} · ${rupees(m * n)}`, description: `Class ${cls} · ${rupees(m)}/month · till ${fmtDate(monthsEndIST(start, n))}` });
+  }
+  await ctx.list(head.join('\n'), 'See plans', [{ title: 'Plans', rows }]);
   const f = offerFooter();
   if (f) await ctx.say(`⏳ ${f}`);
 }
 
+// Free 30-day trial: once per student, on WhatsApp and (if linked) app.yneet.in.
+async function startTrial(ctx) {
+  const u = ctx.user;
+  const acc = await access(ctx);
+  if (acc.ok) return ctx.buttons(`✅ You already have full access till ${fmtDate(acc.until)}.`, [['y:mock', '🧪 Start a mock'], ['y:chap', '📚 Chapter test'], ['y:plans', 'Plans']]);
+  let web = null;
+  if (bridge.enabled()) { try { web = await bridge.lookup(ctx.phone); } catch (e) { console.warn('[yneet] web lookup failed', e.message); } }
+  const usedOnWeb = web && web.plan && web.plan !== 'NONE';
+  if (u.trialUsed || usedOnWeb) {
+    await ctx.say(`Your free trial has already been used${usedOnWeb && !u.trialUsed ? ' on app.yneet.in' : ''}. Pick a plan to continue 👇`);
+    return showPlans(ctx);
+  }
+  const now = new Date();
+  const until = new Date(now.getTime() + ctx.cfg.trial.days * DAY);
+  await ctx.setUser({ plan: { id: 'trial', since: now, until }, trialUsed: true });
+  await ctx.track('trial_start', {});
+  let webOk = false;
+  if (web) {
+    try { webOk = await bridge.grant({ phone: ctx.phone, planKey: ctx.cfg.trial.key, start: now, end: until, amountPaise: 0, paymentId: null }); } catch (e) { console.error('[yneet] could not start the app.yneet.in trial', e); }
+  }
+  await ctx.say(`🎁 Your ${ctx.cfg.trial.days}-day free trial is on!\nFull access till ${fmtDate(until)}: unlimited mocks, every chapter test, PYQ papers and rank estimate.${webOk ? '\nYour app.yneet.in account is unlocked too.' : bridge.enabled() ? `\nTo use app.yneet.in too, sign up there with this WhatsApp number (${maskPhone(ctx.phone)}).` : ''}`);
+  return ctx.buttons('Start now:', [['y:mock', '🧪 Full NEET mock'], ['y:chap', '📚 Chapter test'], ['y:pyq', '📜 PYQ papers']]);
+}
+
 async function buy(ctx, id) {
+  if (id === 'trial30d' || id === 'trial5d' || id === 'trial') return startTrial(ctx); // old ₹99 buttons in chat history lead to the free trial
   const cls = ctx.user.classLevel || '12th';
-  const plan = id === 'monthly'
-    ? { item: 'monthly', key: 'MONTHLY', title: `YNeet Monthly (Class ${cls})`, price: monthlyPrice(ctx.cfg, cls) }
-    : { item: 'trial5d', key: 'TRIAL_5D', title: `YNeet ${ctx.cfg.trial.title}`, price: ctx.cfg.trial.price };
-  const order = await createOrder({ product: 'yneet', phone: ctx.phone, item: plan.item, title: plan.title, amount: plan.price, meta: { key: plan.key, classLevel: cls } });
+  const n = id === 'monthly' ? 1 : Math.min(ctx.cfg.maxMonths || 12, Math.max(1, parseInt(String(id).replace(/^m/, ''), 10) || 1));
+  const price = monthlyPrice(ctx.cfg, cls) * n;
+  const plan = { item: 'monthly', key: 'MONTHLY', title: n === 1 ? `YNeet Monthly (Class ${cls})` : `YNeet ${monthsLabel(n)} (Class ${cls})`, price };
+  const order = await createOrder({ product: 'yneet', phone: ctx.phone, item: plan.item, title: plan.title, amount: plan.price, meta: { key: plan.key, classLevel: cls, months: n } });
   await ctx.link(`${plan.title} · ${rupees(plan.price)}\nPay with any UPI app. Access starts right after payment${bridge.enabled() ? ', on WhatsApp and app.yneet.in' : ''}.`, order.link, 'Pay by UPI');
 }
 
 export async function onPaid(ctx, order) {
   const now = new Date();
   const current = active(ctx.user.plan?.until) ? new Date(ctx.user.plan.until) : now;
-  const until = order.item === 'monthly' ? endOfMonthIST(current) : new Date(current.getTime() + ctx.cfg.trial.days * DAY);
+  // Monthly: N months starting the second after any active plan ends. ('trial5d' = an old ₹99 order paid late.)
+  const until = order.item === 'monthly' ? monthsEndIST(planStart(ctx.user), order.meta?.months || 1) : new Date(current.getTime() + 5 * DAY);
   await ctx.setUser({ plan: { id: order.item, since: now, until } });
   let web = false;
   if (bridge.enabled()) {

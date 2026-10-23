@@ -9,7 +9,11 @@ export const products = {
     exam: 'NEET',
     classes: ['6th', '7th', '8th', '9th', '10th', '11th', '12th', 'Dropper'],
     // Same plans and prices as app.yneet.in (subscriptionController.js)
-    trial: { id: 'trial5d', key: 'TRIAL_5D', title: '5-day full access', price: 99, days: 5 },
+    // Free 30-day full-access trial, once per student (replaces the old ₹99 / 5-day plan)
+    trial: { id: 'trial30d', key: 'TRIAL_30D', title: '30-day free trial', price: 0, days: 30 },
+    // Monthly plan: buy 1 to 12 months in one payment; these are the quick choices shown in chat
+    monthOptions: [1, 3, 6, 12],
+    maxMonths: 12,
     monthlyByClass: { Dropper: 600, '12th': 500, '11th': 500, '10th': 400, '9th': 400, '8th': 300, '7th': 300, '6th': 300 },
     // NEET pattern: 180 questions, 180 minutes, +4 / −1
     mockPattern: { Physics: 45, Chemistry: 45, Biology: 90 },

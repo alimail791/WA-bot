@@ -75,7 +75,7 @@ test('Checkout success with a valid signature marks the order paid; a bad one do
 });
 
 test('Paid in a UPI app without coming back: status check asks Razorpay and confirms', async () => {
-  const o = await pay.createOrder({ product: 'yneet', phone: '919000000701', item: 'plan:trial5d', title: 'YNeet 5 days', amount: 99 });
+  const o = await pay.createOrder({ product: 'yneet', phone: '919000000701', item: 'monthly', title: 'YNeet Monthly', amount: 500 });
   let s = await realFetch(`${base}/pay/${o._id}/status`).then((r) => r.json());
   assert.equal(s.paid, false);
   captured = true;

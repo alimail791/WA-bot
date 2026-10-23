@@ -41,7 +41,7 @@ export function homePage() {
 <h2>What you can buy</h2>
 <div class="grid">
   <div class="card"><h3>YNeet · NEET preparation</h3><p class="muted">Chapter practice from 3,600+ NEET questions, full mock tests with NEET marking, previous year papers and rank estimate.</p>
-    <ul><li><span class="price">₹${y.trial.price}</span> for ${y.trial.days} days full access</li><li>Monthly plan <span class="price">₹${Math.min(...monthly)}–₹${Math.max(...monthly)}</span> by class (6th to Dropper)</li></ul></div>
+    <ul><li><span class="price">Free</span> for ${y.trial.days} days, full access</li><li>Monthly plan <span class="price">₹${Math.min(...monthly)}–₹${Math.max(...monthly)}</span> a month by class (6th to Dropper), 1 to ${y.maxMonths || 12} months at a time</li></ul></div>
   <div class="card"><h3>TestMandi · Mock tests</h3><p class="muted">Mock tests for NEET, SSC, TNPSC, banking and more, created by verified teachers and institutes.</p>
     <ul><li>Single tests and test packs, typically <span class="price">₹29–₹199</span>, price shown before payment</li><li>Explanations and rank included</li></ul></div>
   <div class="card"><h3>ClassCoach · For teachers</h3><p class="muted">Make a quiz in seconds, send one link to the class WhatsApp group, and get every student's marks automatically. 30-day free trial.</p>
