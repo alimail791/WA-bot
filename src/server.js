@@ -25,6 +25,9 @@ if (ccBridge.enabled()) {
     .catch((e) => console.error(`[classcoach] could not reach classcoach.in: ${e.message}`));
 }
 if (config.enableCron) startCron();
+import('./yneetJourney.js').then((m) => m.previewTrialJourney())
+  .then((r) => r && console.log('[yneet-trial] journey preview', JSON.stringify(r)))
+  .catch((e) => console.error('[yneet-trial] journey preview failed', e.message));
 if (tmSync.enabled() && config.store === 'mongo') tmSync.startSync(Number(process.env.TESTMANDI_SYNC_MINUTES || 15));
 
 createApp().listen(config.port, () => {

@@ -98,3 +98,19 @@ export async function yneetTrialJourney(now = Date.now()) {
   }
   return { sent, skipped };
 }
+
+// Dry run for the start-up log: how many trial students are in each stage, and one stats lookup,
+// so a broken query shows up in the logs on deploy instead of at 11:15 the next morning.
+export async function previewTrialJourney(now = Date.now()) {
+  if (!yneet.enabled()) return null;
+  const list = await yneet.trialCandidates();
+  const stages = {};
+  let sample = null;
+  for (const c of list) {
+    const st = stageFor(c, now) || 'none';
+    stages[st] = (stages[st] || 0) + 1;
+    if (!sample && st !== 'none') sample = c;
+  }
+  const s = sample ? await yneet.trialStats(sample.userId, new Date(sample.startDate)) : null;
+  return { trialStudents: list.length, withPhone: list.filter((c) => waPhone(c.phone)).length, stages, sampleStats: s && { ...s, weakChapter: s.weakChapter ? 'yes' : 'no' } };
+}
