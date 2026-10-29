@@ -88,3 +88,55 @@ async function referralReward(userId) {
     ['wa' + randomBytes(10).toString('hex'), ref.referrerId, active ? sub.startDate : start, end]);
   await q(`UPDATE referrals SET "rewardGranted" = true WHERE id = $1`, [ref.id]);
 }
+
+// ---- 30-day trial journey (see yneetJourney.js) ----
+
+/** Students on the free 30-day trial who started within the last 34 days. */
+export async function trialCandidates() {
+  if (impl) return impl.trialCandidates ? impl.trialCandidates() : [];
+  if (!enabled()) return [];
+  return q(
+    `SELECT u.id AS "userId", u.name, coalesce(nullif(u.phone, ''), p.phone) AS phone, p.class AS "classLevel",
+            s."startDate", s."endDate"
+       FROM subscriptions s
+       JOIN users u ON u.id = s."userId"
+       LEFT JOIN profiles p ON p."userId" = u.id
+      WHERE s.plan = 'TRIAL_30D' AND s."startDate" IS NOT NULL
+        AND s."startDate" > now() - interval '34 days'`);
+}
+
+/** What a student did since `since`: practice, tests, accuracy, active days, mock scores, weakest chapter. */
+export async function trialStats(userId, since) {
+  if (impl) return impl.trialStats ? impl.trialStats(userId, since) : null;
+  if (!enabled()) return null;
+  const [a] = await q(
+    `SELECT
+       (SELECT count(*)::int FROM practice_stats WHERE "userId" = $1 AND "solvedAt" >= $2) AS practiced,
+       (SELECT count(*)::int FROM practice_stats WHERE "userId" = $1 AND "solvedAt" >= $2 AND correct) AS "practiceRight",
+       (SELECT count(*)::int FROM attempts WHERE "userId" = $1 AND status = 'submitted' AND "submittedAt" >= $2) AS tests,
+       (SELECT count(*)::int FROM attempt_responses r JOIN attempts t ON t.id = r."attemptId"
+          WHERE t."userId" = $1 AND t."submittedAt" >= $2 AND r.selected IS NOT NULL) AS answered,
+       (SELECT count(*)::int FROM attempt_responses r JOIN attempts t ON t.id = r."attemptId"
+          WHERE t."userId" = $1 AND t."submittedAt" >= $2 AND r."isCorrect") AS "answeredRight",
+       (SELECT count(DISTINCT d)::int FROM (
+          SELECT ("solvedAt" + interval '330 minutes')::date AS d FROM practice_stats WHERE "userId" = $1 AND "solvedAt" >= $2
+          UNION SELECT ("submittedAt" + interval '330 minutes')::date FROM attempts WHERE "userId" = $1 AND "submittedAt" >= $2
+          UNION SELECT ("createdAt" + interval '330 minutes')::date FROM quiz_results WHERE "userId" = $1 AND "createdAt" >= $2) x) AS "activeDays"`,
+    [userId, since]);
+  const mocks = await q(
+    `SELECT score FROM attempts WHERE "userId" = $1 AND status = 'submitted' AND "submittedAt" >= $2 AND "totalMarks" >= 600
+      ORDER BY "submittedAt" ASC`, [userId, since]);
+  const [weak] = await q(
+    `SELECT qs.chapter, sum(m.count)::int AS n FROM mistakes m JOIN questions qs ON qs.id = m."questionId"
+      WHERE m."userId" = $1 AND m."lastSeen" >= $2 AND coalesce(qs.chapter, '') <> ''
+      GROUP BY qs.chapter ORDER BY n DESC LIMIT 1`, [userId, since]);
+  const solved = a.practiced + a.answered;
+  const right = a.practiceRight + a.answeredRight;
+  return {
+    solved, tests: a.tests, activeDays: a.activeDays,
+    accuracy: solved ? Math.round((right / solved) * 100) : null,
+    firstMock: mocks.length ? mocks[0].score : null,
+    latestMock: mocks.length > 1 ? mocks[mocks.length - 1].score : null,
+    weakChapter: weak?.chapter || null,
+  };
+}

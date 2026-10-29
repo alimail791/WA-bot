@@ -136,6 +136,7 @@ export function startCron() {
   cron.schedule('0 19 * * *', safe('daily-quiz', dailyQuizReminder), tz);
   cron.schedule('0 18 * * 0', safe('parent-report', weeklyParentReports), tz);
   cron.schedule('0 11 * * *', safe('trial-ending', trialEndingReminders), tz);
+  cron.schedule('15 11 * * *', safe('yneet-trial-journey', async () => (await import('./yneetJourney.js')).yneetTrialJourney()), tz);
   cron.schedule('*/5 * * * *', safe('lead-campaign', async () => {
     const r = await (await import('./leads.js')).campaignTick();
     if (r && r.skipped !== 'outside hours' && r.skipped !== 'sunday') console.log('[campaign]', JSON.stringify(r));

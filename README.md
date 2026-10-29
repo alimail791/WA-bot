@@ -126,6 +126,13 @@ Inside 24 hours of a person's last message, the bot replies for free. To message
 | `TEMPLATE_CLASS_RESULTS` | Utility | Results for "{{1}}": {{2}} students have finished. Reply RESULTS to see marks. |
 | `TEMPLATE_UPGRADE` | Utility | {{1}} now has {{2}} students. Reply PLANS to add everyone. |
 | `TEMPLATE_TRIAL_ENDING` | Utility | Your ClassCoach Pro trial ends in 2 days. Your class has {{1}} students. Reply PLANS to keep Pro. |
+| `TEMPLATE_YNEET_TRIAL_D3` | Marketing | Hi {{1}}, your YNeet free trial is on, but you haven't taken a test yet. Start with one 20-minute chapter test and see your score with every explanation. |
+| `TEMPLATE_YNEET_TRIAL_D7` | Marketing | Week 1 done, {{1}}! You solved {{2}} questions with {{3}} accuracy. Your weakest chapter is {{4}}. Practise it today on YNeet. |
+| `TEMPLATE_YNEET_TRIAL_D20` | Marketing | {{1}}, 10 days left in your YNeet free trial. Your full mock score: {{2}}. Take one full NEET mock this week to see how far you've come. |
+| `TEMPLATE_YNEET_TRIAL_D27` | Marketing | {{1}}, your YNeet free trial ends in 3 days. This month: {{2}} days studied, {{3}} tests. Continue from ₹399/month, or ₹3,199 for a full year. Your progress stays saved. |
+| `TEMPLATE_YNEET_TRIAL_ENDED` | Marketing | {{1}}, your YNeet free trial has ended. Your tests, mistake notebook and streak are saved. Pick a plan to carry on from where you stopped. |
+
+The five `TEMPLATE_YNEET_TRIAL_*` templates drive the 30-day trial journey (`src/yneetJourney.js`, daily 11:15 IST, needs `YNEET_DATABASE_URL`). Give each one a "Visit website" button with the static URL `https://app.yneet.in/pricing` (D3: `https://app.yneet.in`). Inside the 24-hour window the bot sends a free message with a button instead.
 
 Only message people who contacted you or agreed to messages. Parent numbers come from the student; tell parents how to stop (STOP) in the first message.
 
