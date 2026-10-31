@@ -41,6 +41,8 @@ async function syncFromWeb(ctx) {
   }
   if (!ctx.user.name && web.name) patch.name = web.name;
   await ctx.setUser(patch);
+  // A message from this number proves it belongs to the teacher: mark it verified on classcoach.in.
+  if (web.phoneVerified === false) ccWeb.verifyPhone(ctx.phone).catch((e) => console.warn('[classcoach] verify phone failed', e.message));
   return web;
 }
 
@@ -63,7 +65,8 @@ export async function handle(ctx, input) {
     await ctx.setUser({ role: 'tutor', trialEndsAt: new Date(Date.now() + ctx.cfg.trialDays * DAY) });
   }
   if (!ctx.user.refCode) await ctx.setUser({ refCode: refCodeFor('classcoach', ctx.phone) });
-  await syncFromWeb(ctx);
+  const web = await syncFromWeb(ctx);
+  if (upper === 'VERIFY' || replyId === 'cc:verify') return verifyNumber(ctx, web);
   const cref = upper.match(/\bCREF\s+([A-Z0-9]{6})\b/);
   if (cref) await joinWithInvite(ctx, cref[1]);
   if (state === 'await_topic' && !replyId) return makeQuiz(ctx, ctx.session.data.subject, text);
@@ -92,6 +95,21 @@ export async function handle(ctx, input) {
   if (cmdText === 'plans') return plans(ctx);
   if (cmdText === 'class') return classInfo(ctx);
   return tutorMenu(ctx);
+}
+
+// "Verify my number" (template button) or VERIFY typed: the message itself proves the number.
+async function verifyNumber(ctx, web) {
+  const site = 'https://www.classcoach.in';
+  if (!ccWeb.enabled()) return ctx.say('Thanks! Your number is noted. 🙏');
+  if (!web) {
+    return ctx.say(`This WhatsApp number isn't on a ClassCoach account yet.\n\nIf you already have an account, open ${site}/settings and change your phone number to this one, then send VERIFY again.\nNew here? Sign up free at ${site}/signup`);
+  }
+  let r = null;
+  try { r = await ccWeb.verifyPhone(ctx.phone); } catch (e) { console.warn('[classcoach] verify phone failed', e.message); }
+  if (!r) return ctx.say('Sorry, we couldn\'t verify your number just now. Please try again in a few minutes.');
+  const first = String(r.name || web.name || '').split(' ')[0];
+  const email = r.emailVerified ? '✅ Email verified' : `⚠️ Email not verified yet: open ${site}/settings and tap "Resend code"`;
+  return ctx.say(`✅ Thanks${first ? ` ${first}` : ''}! Your WhatsApp number is verified for ClassCoach.\n${email}\n\nYou'll get class results and important account alerts here. Send MENU anytime.`);
 }
 
 async function getClass(ctx) {

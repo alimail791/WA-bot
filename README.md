@@ -155,6 +155,20 @@ Every 30 min, 10:00–20:00 IST, reading testmandi.in's users (needs `TESTMANDI_
 
 "Yes, it's me" sets `phoneVerified` on the testmandi.in user; "Not my number" (free message only) stops these messages for that account.
 
+### ClassCoach teacher journey (welcome, verify, refer & earn, we miss you)
+`src/classcoachJourney.js` runs every 30 minutes, 9 AM–9 PM IST, using `CLASSCOACH_API_URL` + `CLASSCOACH_BOT_KEY` (classcoach.in's `/internal/wa/journey`). Each teacher gets at most one of these a day, each stage once (refer: once a month; we miss you: once per absence). Teachers who sent STOP get none. Create these four templates in English, then put each approved name in the variable:
+
+| Variable | Category | Template text | Button |
+|---|---|---|---|
+| `TEMPLATE_CC_WELCOME` | Utility | Welcome to ClassCoach, {{1}}! 🎉 Your free trial is active. Start in 3 steps: 1) Create your class 2) Make your first test with AI in 1 minute 3) Share the class code with your students. Results are graded automatically and parents can get reports on WhatsApp. Need help? Just reply to this message. | Visit website: `https://www.classcoach.in/dashboard` |
+| `TEMPLATE_CC_VERIFY` | Utility | Hi {{1}}, please confirm this is your WhatsApp number for your ClassCoach account. Tap "Verify my number" below. We use it only for class results and important account alerts. {{2}} | Quick reply: `Verify my number` |
+| `TEMPLATE_CC_REFER` | Marketing | Hi {{1}}, enjoying ClassCoach? 🙌 Share it with other teachers and institutes. {{2}} Your invite link: {{3}} | Quick reply: `Stop promotions` |
+| `TEMPLATE_CC_MISS_YOU` | Marketing | Hi {{1}}, we miss you on ClassCoach! 👋 It's been {{2}} days since your last visit, and {{3}} are waiting. Make a quick test with AI in 1 minute, or run a 5-minute Live Quiz in your next class. | Visit website: `https://www.classcoach.in/dashboard` · Quick reply: `Stop promotions` |
+
+Sample values for Meta's review: {{1}} `Ravi` · VERIFY {{2}} `Your email is already verified.` · REFER {{2}} `For every 2 teachers who buy a plan through your link, you get 2 months free.` {{3}} `https://www.classcoach.in/signup?ref=ravi1234` · MISS {{2}} `6` {{3}} `your 24 students`.
+
+Tapping "Verify my number" (or sending VERIFY, or any message from the number on the account) marks the phone verified on classcoach.in. Inside the 24-hour window the bot sends a free message with a button instead of the template. The start-up log prints `[cc-journey] preview` with how many teachers are in each stage and which templates are still missing.
+
 Only message people who contacted you or agreed to messages. Parent numbers come from the student; tell parents how to stop (STOP) in the first message.
 
 ## Watch the numbers
