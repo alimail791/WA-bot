@@ -28,6 +28,9 @@ if (config.enableCron) startCron();
 import('./yneetJourney.js').then((m) => m.previewTrialJourney())
   .then((r) => r && console.log('[yneet-trial] journey preview', JSON.stringify(r)))
   .catch((e) => console.error('[yneet-trial] journey preview failed', e.message));
+import('./yneetLifecycle.js').then((m) => m.previewLifecycle())
+  .then((r) => r && console.log('[yneet-life] lifecycle preview', JSON.stringify(r)))
+  .catch((e) => console.error('[yneet-life] lifecycle preview failed', e.message));
 if (tmSync.enabled() && config.store === 'mongo') tmSync.startSync(Number(process.env.TESTMANDI_SYNC_MINUTES || 15));
 
 createApp().listen(config.port, () => {

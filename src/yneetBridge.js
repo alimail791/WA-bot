@@ -140,3 +140,36 @@ export async function trialStats(userId, since) {
     weakChapter: weak?.chapter || null,
   };
 }
+
+// ---- Lifecycle messages (see yneetLifecycle.js) ----
+
+/** Students who signed up in the last `hours` hours (for the welcome message). */
+export async function newStudents(hours = 48) {
+  if (impl) return impl.newStudents ? impl.newStudents(hours) : [];
+  if (!enabled()) return [];
+  return q(
+    `SELECT u.id AS "userId", u.name, coalesce(nullif(u.phone, ''), p.phone) AS phone, p.class AS "classLevel", u."createdAt"
+       FROM users u LEFT JOIN profiles p ON p."userId" = u.id
+      WHERE u.role = 'student' AND u."createdAt" > now() - ($1 || ' hours')::interval`, [String(hours)]);
+}
+
+/** Every student with what the lifecycle rules need: verification, parent email, activity, plan. */
+export async function lifecycleStudents() {
+  if (impl) return impl.lifecycleStudents ? impl.lifecycleStudents() : [];
+  if (!enabled()) return [];
+  return q(
+    `SELECT u.id AS "userId", u.name, coalesce(nullif(u.phone, ''), p.phone) AS phone, u."createdAt",
+            u."isVerified", u."referralCode", p.class AS "classLevel", p."parentEmail",
+            s.plan, s.status, s."endDate",
+            (SELECT count(*)::int FROM attempts a WHERE a."userId" = u.id AND a.status = 'submitted') AS tests,
+            (SELECT count(*)::int FROM practice_stats x WHERE x."userId" = u.id) AS practiced,
+            greatest(
+              (SELECT max(a."submittedAt") FROM attempts a WHERE a."userId" = u.id),
+              (SELECT max(x."solvedAt") FROM practice_stats x WHERE x."userId" = u.id),
+              (SELECT max(r."createdAt") FROM quiz_results r WHERE r."userId" = u.id)
+            ) AS "lastActive"
+       FROM users u
+       LEFT JOIN profiles p ON p."userId" = u.id
+       LEFT JOIN subscriptions s ON s."userId" = u.id
+      WHERE u.role = 'student'`);
+}

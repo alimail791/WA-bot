@@ -132,6 +132,14 @@ Inside 24 hours of a person's last message, the bot replies for free. To message
 | `TEMPLATE_YNEET_TRIAL_D27` | Marketing | Hi {{1}}, your YNeet free trial ends in 3 days. This month: {{2}} days studied, {{3}} tests. Continue from ₹399/month, or ₹3,199 for a full year. Your progress stays saved. |
 | `TEMPLATE_YNEET_TRIAL_ENDED` | Marketing | Hi {{1}}, your YNeet free trial has ended. Your tests, mistake notebook and streak are saved. Pick a plan to carry on from where you stopped. |
 
+| `TEMPLATE_YNEET_WELCOME` | Marketing | Hi {{1}}, welcome to YNeet! Your account is ready. Start with one 20-minute chapter test today and see your weak chapters. Any doubt, just reply to this message. |
+| `TEMPLATE_YNEET_VERIFY` | Utility | Hi {{1}}, please confirm your WhatsApp number or email on YNeet. It takes 30 seconds and keeps your account active. |
+| `TEMPLATE_YNEET_PARENT` | Marketing | Hi {{1}}, add your parent's WhatsApp number or email in YNeet (Profile, Parent updates). They will get a short weekly report of your tests and progress. |
+| `TEMPLATE_YNEET_REFER` | Marketing | Hi {{1}}, enjoying YNeet? Share it with your NEET friends. When a friend joins with your link and takes a plan, you get 1 month of YNeet free. Your link: {{2}} |
+| `TEMPLATE_YNEET_MISSYOU` | Marketing | Hi {{1}}, we miss you on YNeet! It has been {{2}} days since your last practice. A 20-minute chapter test today keeps your NEET prep on track. |
+
+Lifecycle messages (`src/yneetLifecycle.js`): welcome every 10 minutes from 8 AM to 9:30 PM IST; verify, parent, refer and miss-you once a day at 5:30 PM IST, at most one per student per day and never on a day the trial journey already messaged them.
+
 The five `TEMPLATE_YNEET_TRIAL_*` templates drive the 30-day trial journey (`src/yneetJourney.js`, daily 11:15 IST, needs `YNEET_DATABASE_URL`). Give each one a "Visit website" button with the static URL `https://app.yneet.in/pricing` (D3: `https://app.yneet.in`). Inside the 24-hour window the bot sends a free message with a button instead.
 
 Only message people who contacted you or agreed to messages. Parent numbers come from the student; tell parents how to stop (STOP) in the first message.
