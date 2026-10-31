@@ -175,7 +175,7 @@ Only message people who contacted you or agreed to messages. Parent numbers come
 
 The bot also messages VasulBook owners on the same number: **welcome** after sign-up, **confirm number & email** (a "Yes, my number" button confirms the WhatsApp number in VasulBook), **refer & earn** for owners who really use it (after 7, 37 and 67 days), and **we miss you** after 5 idle days. One VasulBook message per owner per day; replies (STOP, START, button taps, questions) are answered as VasulBook. Texts are in 10 languages (`src/vasulbookTemplates.js`); each owner gets their app language, or English if that language is not approved yet.
 
-Set `VASULBOOK_BOT_KEY` here and the same value as `BOT_API_KEY` on the VasulBook service. Then open `/admin/vasulbook?key=ADMIN_KEY` and press **Submit missing templates to Meta** (it creates `vasulbook_welcome`, `vasulbook_verify`, `vasulbook_refer` and `vasulbook_missyou` in all 10 languages). Messages start as soon as Meta approves them.
+Set `VASULBOOK_BOT_KEY` here and the same value as `BOT_API_KEY` on the VasulBook service. Then open `/admin/vasulbook?key=ADMIN_KEY` and press **Submit missing templates to Meta** (it creates `vasulbook_welcome`, `vasulbook_confirm`, `vasulbook_refer` and `vasulbook_missyou` in all 10 languages). Messages start as soon as Meta approves them.
 
 ## Watch the numbers
 ```bash

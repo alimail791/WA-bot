@@ -10,7 +10,7 @@ export function vasulbookPage({ st, preview, link, sentWeek, key, result }) {
   const head = `<tr><th>Message</th>${LANGS.map((l) => `<th>${l}</th>`).join('')}</tr>`;
   const rows = KINDS.map((k) => `<tr><td><b>${LABEL[k]}</b><div class="m">${NAME(k)} · ${CATEGORY[k].toLowerCase()}</div></td>${LANGS.map((l) => {
     const s = map[`${NAME(k)}|${l}`];
-    return `<td style="color:${color(s?.status)}" title="${esc(s?.reason || '')}">${s ? (s.status === 'APPROVED' ? '✓' : esc(s.status.toLowerCase())) : '–'}</td>`;
+    return `<td style="color:${color(s?.status)}">${s ? (s.status === 'APPROVED' ? '✓' : esc(s.status.toLowerCase())) : '–'}${s?.status === 'REJECTED' && s.reason && s.reason !== 'NONE' ? `<div class="m">${esc(String(s.reason).toLowerCase().replace(/_/g, ' '))}</div>` : ''}</td>`;
   }).join('')}</tr>`).join('');
   const samples = KINDS.map((k) => `<details><summary>${LABEL[k]}</summary><p>${esc(tr('en')[k])}</p><p class="m">Footer: ${esc(tr('en').footer)}</p></details>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VasulBook WhatsApp</title>
