@@ -45,3 +45,20 @@ export async function check() {
   });
   return res.status === 404 ? 'ok' : `unexpected ${res.status}`;
 }
+
+// ---- WhatsApp journey (see classcoachJourney.js) ----
+// Teachers the journey may message, with what it needs to pick a stage.
+export async function journeyCandidates() {
+  if (impl) return impl.journeyCandidates ? impl.journeyCandidates() : [];
+  if (!enabled()) return [];
+  const r = await call('/internal/wa/journey');
+  return r?.teachers || [];
+}
+
+// Mark the account with this phone as WhatsApp-verified. Returns { ok, alreadyVerified, emailVerified, name } or null.
+export async function verifyPhone(phone) {
+  if (impl) return impl.verifyPhone ? impl.verifyPhone(phone) : null;
+  if (!enabled()) return null;
+  cache.delete(phone);
+  return call('/internal/wa/verify-phone', { method: 'POST', body: JSON.stringify({ phone }) });
+}

@@ -63,7 +63,8 @@ export async function handleInbound({ product, phone, name = '', text = '', repl
   const typed = replyId ? '' : String(text || '').trim();
   const input = { text: typed, replyId: replyId || '', upper: typed.toUpperCase() };
 
-  if (input.upper === 'STOP' || input.upper === 'UNSUBSCRIBE') {
+  // "Stop promotions" is the opt-out button on marketing templates; its tap arrives as a reply id.
+  if (input.upper === 'STOP' || input.upper === 'UNSUBSCRIBE' || /^stop promotions$/i.test(input.replyId)) {
     await ctx.setUser({ optedOut: true });
     return ctx.say('You won\'t get reminders from us any more. Send START anytime to turn them back on.');
   }
