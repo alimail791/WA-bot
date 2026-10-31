@@ -43,7 +43,12 @@ export async function check() {
   const res = await fetch(process.env.CLASSCOACH_API_URL.replace(/\/$/, '') + '/internal/wa/teacher?phone=0000000000', {
     headers: { 'x-internal-key': process.env.CLASSCOACH_BOT_KEY }, signal: AbortSignal.timeout(8000),
   });
-  return res.status === 404 ? 'ok' : `unexpected ${res.status}`;
+  const host = (() => { try { return new URL(process.env.CLASSCOACH_API_URL).host; } catch { return 'invalid URL'; } })();
+  if (res.status === 401) return `wrong CLASSCOACH_BOT_KEY (classcoach.in at ${host} refused it)`;
+  if (res.status !== 404) return `unexpected ${res.status} from ${host}`;
+  // classcoach.in answers an unknown phone with JSON {found:false}; any other "not found" page means the URL is wrong.
+  const body = await res.json().catch(() => null);
+  return body && body.found === false ? `ok (${host})` : `CLASSCOACH_API_URL looks wrong: ${host} is not classcoach.in`;
 }
 
 // ---- WhatsApp journey (see classcoachJourney.js) ----
