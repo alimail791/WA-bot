@@ -28,6 +28,9 @@ if (config.enableCron) startCron();
 import('./yneetJourney.js').then((m) => m.previewTrialJourney())
   .then((r) => r && console.log('[yneet-trial] journey preview', JSON.stringify(r)))
   .catch((e) => console.error('[yneet-trial] journey preview failed', e.message));
+import('./vasulbookLifecycle.js').then((m) => m.previewLifecycle())
+  .then((r) => r && console.log('[vasulbook] lifecycle preview', JSON.stringify(r)))
+  .catch((e) => console.error('[vasulbook] could not reach www.vasulbook.com', e.message));
 import('./yneetLifecycle.js').then((m) => m.previewLifecycle())
   .then((r) => r && console.log('[yneet-life] lifecycle preview', JSON.stringify(r)))
   .catch((e) => console.error('[yneet-life] lifecycle preview failed', e.message));

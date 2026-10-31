@@ -6,6 +6,7 @@ import { products, productKeys } from './products.js';
 import { handleInbound, dispatchAttempt, getUser } from './engine.js';
 import { parseWebhook, parseExtras } from './providers/meta.js';
 import * as leads from './leads.js';
+import * as vbLife from './vasulbookLifecycle.js';
 import { leadsPage } from './leadsPage.js';
 import * as waCheck from './waCheck.js';
 import * as payCheck from './payCheck.js';
@@ -80,6 +81,11 @@ export function createApp() {
       try {
         if (await leads.intercept(ev, { setPick })) continue;
       } catch (e) { console.error('[leads] intercept', e); }
+      if (!productForNumber(ev.phoneNumberId)) {
+        try {
+          if (await vbLife.intercept(ev)) continue;
+        } catch (e) { console.error('[vasulbook] intercept', e); }
+      }
       let product = productForNumber(ev.phoneNumberId);
       const shared = !product && ev.phoneNumberId === config.wa.sharedNumberId;
       if (shared) product = await productOnSharedNumber(ev);
@@ -292,6 +298,23 @@ ${ranges.map(([, label], i) => `<section><h2><span>${label}</span><span>${inr(to
   app.get('/admin/whatsapp', keyed, async (req, res) => res.send(waCheck.page(await waCheck.check({ fix: req.query.fix === '1' }), String(req.query.key || ''))));
   app.get('/admin/payments', keyed, async (_req, res) => res.send(payCheck.page(await payCheck.check())));
   app.get('/admin/leads', keyed, (_req, res) => res.send(leadsPage()));
+  // ---- VasulBook WhatsApp messages: /admin/vasulbook?key=ADMIN_KEY -------
+  app.get('/admin/vasulbook', keyed, async (req, res) => {
+    const { vasulbookPage } = await import('./vasulbookPage.js');
+    const [st, preview, link] = await Promise.all([
+      vbLife.statusTable(),
+      vbLife.previewLifecycle().catch((e) => ({ error: e.message })),
+      (await import('./vasulbookBridge.js')).check().catch((e) => ({ error: e.message })),
+    ]);
+    const sentWeek = await db.events.count({ product: 'vasulbook', type: 'lifecycle', at: { $gte: new Date(Date.now() - 7 * 86400e3) } });
+    res.send(vasulbookPage({ st, preview, link, sentWeek, key: String(req.query.key || '') }));
+  });
+  app.post('/admin/vasulbook/templates', keyed, async (req, res) => {
+    const { vasulbookPage } = await import('./vasulbookPage.js');
+    let result;
+    try { result = await vbLife.submitTemplates(); } catch (e) { result = [{ name: '-', lang: '-', result: 'error: ' + e.message }]; }
+    res.send(vasulbookPage({ st: await vbLife.statusTable(), preview: null, link: null, sentWeek: null, key: String(req.query.key || ''), result }));
+  });
   app.get('/admin/leads/summary', keyed, async (_req, res) => {
     const since = new Date(Date.now() - 7 * 86400e3);
     const cnt = (type) => db.events.count({ product: 'leads', type, at: { $gte: since } });
