@@ -381,7 +381,7 @@ async function setPick(phone, pick) {
 // One shared number for all products: remember the user's choice, otherwise ask.
 async function productOnSharedNumber(ev) {
   const upper = ev.replyId ? '' : String(ev.text || '').toUpperCase();
-  if (/^(TEST|BUY)\s/.test(upper)) return 'testmandi';
+  if (/^(TEST|BUY)\s/.test(upper) || String(ev.replyId || '').startsWith('tm:')) return 'testmandi';
   if (/\b[TS]REF\s/.test(upper)) return 'testmandi';
   if (/^JOIN\s/.test(upper) || /\bCREF\s/.test(upper)) return 'classcoach';
   if (/\bREF\s/.test(upper)) return 'yneet';

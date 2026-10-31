@@ -143,6 +143,7 @@ export function startCron() {
     const r = await (await import('./leads.js')).campaignTick();
     if (r && r.skipped !== 'outside hours' && r.skipped !== 'sunday') console.log('[campaign]', JSON.stringify(r));
   }), tz);
+  cron.schedule('*/30 * * * *', safe('tm-lifecycle', async () => (await import('./tmLifecycle.js')).tmLifecycle()), tz);
   cron.schedule('17 * * * *', safe('lead-onboarding', async () => (await import('./leads.js')).onboardingTick()), tz);
   cron.schedule('3 9 * * *', safe('lead-summary', async () => (await import('./leads.js')).dailySummary()), tz);
   cron.schedule('* * * * *', safe('live-start', async () => (await import('./flows/testmandi.js')).notifyLiveStarts()), tz);

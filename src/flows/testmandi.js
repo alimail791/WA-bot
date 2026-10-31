@@ -86,6 +86,12 @@ export async function handle(ctx, input) {
     if (cmd === 'sales') return sellerStats(ctx);
     if (cmd === 'about') return aboutInfo(ctx);
     if (cmd === 'csv') return csvHelp(ctx);
+    if (cmd === 'phoneok' || cmd === 'phoneno') {
+      const { confirmPhone } = await import('../tmLifecycle.js');
+      const n = await confirmPhone(ctx.phone, cmd === 'phoneok').catch(() => 0);
+      if (cmd === 'phoneno') return ctx.say('Thanks for telling us. We won\'t send TestMandi account messages to this number. To fix it, update the phone number in your profile on testmandi.in.');
+      return ctx.buttons(n ? '✅ Thanks! Your WhatsApp number is confirmed on TestMandi.' : '✅ Thanks! We couldn\'t find this number on a TestMandi account yet. Check the phone number in your profile on testmandi.in.', [['tm:browse', '🔎 Browse tests']]);
+    }
   }
 
   const pending = await pendingOrder(ctx);

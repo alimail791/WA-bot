@@ -142,6 +142,19 @@ Lifecycle messages (`src/yneetLifecycle.js`): welcome every 10 minutes from 8 AM
 
 The five `TEMPLATE_YNEET_TRIAL_*` templates drive the 30-day trial journey (`src/yneetJourney.js`, daily 11:15 IST, needs `YNEET_DATABASE_URL`). Give each one a "Visit website" button with the static URL `https://app.yneet.in/pricing` (D3: `https://app.yneet.in`). Inside the 24-hour window the bot sends a free message with a button instead.
 
+#### TestMandi account messages (`src/tmLifecycle.js`)
+Every 30 min, 10:00–20:00 IST, reading testmandi.in's users (needs `TESTMANDI_SYNC=true`). At most one message per user per run, each sent once. Welcome and verify go only to accounts created after the first run (or `TM_LIFECYCLE_SINCE`). Set `TM_LIFECYCLE=off` to pause.
+
+| Variable | Category | Text ({{n}} in this order) | Quick-reply button (payload) |
+|---|---|---|---|
+| `TEMPLATE_TM_WELCOME` | Marketing | Hi {{1}}, welcome to TestMandi! 🎉 Practise mock tests for NEET, JEE, SSC and more, with instant results, your rank and an explanation for every question. Teachers can sell their own tests and keep 80% of every sale. Start at testmandi.in or tap below to browse tests here on WhatsApp. Reply STOP to opt out. | Browse tests (`tm:browse`) |
+| `TEMPLATE_TM_VERIFY_EMAIL` | Utility | Hi {{1}}, your TestMandi account is almost ready. Please verify your email: log in at testmandi.in and enter the code we emailed you (or tap Resend code). Is this WhatsApp number yours? Tap below to confirm it for order and test updates. | Yes, it's me (`tm:phoneok`) |
+| `TEMPLATE_TM_VERIFY_PHONE` | Utility | Hi {{1}}, please confirm this WhatsApp number for your TestMandi account so we can send your order and test updates here. | Yes, it's me (`tm:phoneok`) |
+| `TEMPLATE_TM_REFER` | Marketing | 🎁 {{1}}, invite friends to TestMandi and earn. Share your referral code {{2}} and get {{3}}. Friends enter the code when they register at testmandi.in. | Share my code (`tm:refer`) |
+| `TEMPLATE_TM_MISS_YOU` | Marketing | We miss you, {{1}}! 👋 It's been {{2}} days since your last visit to TestMandi. New tests are added every week. One 20-minute chapter test today keeps your preparation on track. | Browse tests (`tm:browse`) |
+
+"Yes, it's me" sets `phoneVerified` on the testmandi.in user; "Not my number" (free message only) stops these messages for that account.
+
 Only message people who contacted you or agreed to messages. Parent numbers come from the student; tell parents how to stop (STOP) in the first message.
 
 ## Watch the numbers

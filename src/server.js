@@ -31,6 +31,9 @@ import('./yneetJourney.js').then((m) => m.previewTrialJourney())
 import('./yneetLifecycle.js').then((m) => m.previewLifecycle())
   .then((r) => r && console.log('[yneet-life] lifecycle preview', JSON.stringify(r)))
   .catch((e) => console.error('[yneet-life] lifecycle preview failed', e.message));
+import('./tmLifecycle.js').then((m) => m.previewLifecycle())
+  .then((r) => r && console.log('[tm-life] preview', JSON.stringify(r)))
+  .catch((e) => console.error('[tm-life] preview failed', e.message));
 if (tmSync.enabled() && config.store === 'mongo') tmSync.startSync(Number(process.env.TESTMANDI_SYNC_MINUTES || 15));
 
 createApp().listen(config.port, () => {
