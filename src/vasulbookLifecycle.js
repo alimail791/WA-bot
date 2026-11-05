@@ -30,12 +30,12 @@ async function templateStatuses(force = false) {
   if (!force && Date.now() - statusCache.at < 30 * 60e3) return statusCache.map;
   if (config.provider !== 'meta' || !config.wa.token || !config.wa.wabaId) return statusCache.map;
   const map = {};
-  let url = `${config.wa.apiBase}/${config.wa.wabaId}/message_templates?fields=name,language,status,category,rejected_reason&limit=200`;
+  let url = `${config.wa.apiBase}/${config.wa.wabaId}/message_templates?fields=id,name,language,status,category,rejected_reason&limit=200`;
   for (let i = 0; url && i < 20; i++) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${config.wa.token}` }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`templates ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const j = await res.json();
-    for (const t of j.data || []) if (t.name.startsWith('vasulbook_')) map[`${t.name}|${t.language}`] = { status: t.status, category: t.category, reason: t.rejected_reason };
+    for (const t of j.data || []) if (t.name.startsWith('vasulbook_')) map[`${t.name}|${t.language}`] = { id: t.id, status: t.status, category: t.category, reason: t.rejected_reason };
     url = j.paging?.next || null;
   }
   statusCache = { at: Date.now(), map };
@@ -196,12 +196,15 @@ export async function submitTemplates() {
     for (const lang of LANGS) {
       const k = `${NAME(kind)}|${lang}`;
       if (have[k] && have[k].status !== 'REJECTED') { out.push({ name: NAME(kind), lang, result: have[k].status }); continue; }
-      const res = await fetch(`${config.wa.apiBase}/${config.wa.wabaId}/message_templates`, {
+      const def = definition(kind, lang);
+      // A rejected template is edited in place (Meta allows changing its category and text); a missing one is created.
+      const editing = have[k]?.status === 'REJECTED' && have[k].id;
+      const res = await fetch(editing ? `${config.wa.apiBase}/${have[k].id}` : `${config.wa.apiBase}/${config.wa.wabaId}/message_templates`, {
         method: 'POST', headers: { Authorization: `Bearer ${config.wa.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(definition(kind, lang)), signal: AbortSignal.timeout(20000),
+        body: JSON.stringify(editing ? { category: def.category, components: def.components } : def), signal: AbortSignal.timeout(20000),
       });
       const j = await res.json().catch(() => ({}));
-      out.push({ name: NAME(kind), lang, result: res.ok ? (j.status || 'PENDING') : `error: ${j.error?.error_user_msg || j.error?.message || res.status}` });
+      out.push({ name: NAME(kind), lang, result: res.ok ? (editing ? `resubmitted as ${def.category.toLowerCase()}` : (j.status || 'PENDING')) : `error: ${j.error?.error_user_msg || j.error?.message || res.status}` });
     }
   }
   statusCache.at = 0;

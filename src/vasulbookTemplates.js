@@ -5,7 +5,8 @@
 export const APP_URL = 'https://www.vasulbook.com/app';
 export const REFER_URL = 'https://www.vasulbook.com/app#/refer';
 export const KINDS = ['welcome', 'verify', 'refer', 'missyou'];
-export const CATEGORY = { welcome: 'UTILITY', verify: 'UTILITY', refer: 'MARKETING', missyou: 'MARKETING' };
+// Meta treated the confirm message as Marketing (approved that way in 4 languages, rejected as Utility in others), so it is filed as Marketing.
+export const CATEGORY = { welcome: 'UTILITY', verify: 'MARKETING', refer: 'MARKETING', missyou: 'MARKETING' };
 // verify was renamed: Meta rejected vasulbook_verify (it mentioned an email code); a rejected name can't be reused soon.
 export const NAME = (kind) => (kind === 'verify' ? 'vasulbook_confirm' : `vasulbook_${kind}`);
 // Example values Meta asks for when a template is submitted

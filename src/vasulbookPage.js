@@ -26,7 +26,7 @@ ${preview && !preview.error ? `<p><span class="k"><b>${preview.newLast36h}</b>ne
 <section><h2>2. Templates (approval by Meta)</h2><div class="wrap"><table>${head}${rows}</table></div>
 ${map._error ? `<p class="err">${esc(map._error)}</p>` : ''}
 <p class="m">✓ approved · pending = waiting for Meta · – = not submitted. Owners get their app language; if it isn't approved yet they get English. Messages only go out once a template is approved.</p>
-<form method="post" action="/admin/vasulbook/templates?key=${encodeURIComponent(key)}"><button>Submit missing templates to Meta</button></form></section>
+<form method="post" action="/admin/vasulbook/templates?key=${encodeURIComponent(key)}"><button>Submit missing or rejected templates to Meta</button></form></section>
 <section><h2>English wording</h2>${samples}</section>
 <p class="m">Schedule (India time): welcome every 10 min from 8 AM to 9:30 PM; confirm, refer and we-miss-you daily at 5:45 PM, at most one VasulBook message per owner per day. STOP stops all of them.</p>
 </main></body></html>`;
