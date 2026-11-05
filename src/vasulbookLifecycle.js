@@ -188,6 +188,29 @@ export async function intercept(ev) {
 }
 
 // ---------- templates: submit to Meta and show their status ----------
+const graph = async (url, opts = {}) => {
+  const res = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${config.wa.token}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(20000) });
+  const j = await res.json().catch(() => ({}));
+  return { ok: res.ok, j, err: j.error?.error_user_msg || j.error?.message || String(res.status) };
+};
+// Create a missing template, or fix a rejected one: edit it (with, then without, the category, since all languages
+// of one name share a category); if Meta still refuses, delete only that language and create it again.
+async function submitOne(def, had) {
+  const create = async () => {
+    const r = await graph(`${config.wa.apiBase}/${config.wa.wabaId}/message_templates`, { method: 'POST', body: JSON.stringify(def) });
+    return r.ok ? (r.j.status || 'PENDING') : `error: ${r.err}`;
+  };
+  if (!had?.id) return create();
+  let r = await graph(`${config.wa.apiBase}/${had.id}`, { method: 'POST', body: JSON.stringify({ category: def.category, components: def.components }) });
+  if (r.ok) return `resubmitted (${def.category.toLowerCase()})`;
+  r = await graph(`${config.wa.apiBase}/${had.id}`, { method: 'POST', body: JSON.stringify({ components: def.components }) });
+  if (r.ok) return 'resubmitted (same category as the other languages)';
+  const del = await graph(`${config.wa.apiBase}/${config.wa.wabaId}/message_templates?hsm_id=${had.id}&name=${def.name}`, { method: 'DELETE' });
+  if (!del.ok) return `error: ${r.err} / could not remove to re-create: ${del.err}`;
+  const c = await create();
+  return c.startsWith('error') ? c : `re-created: ${c}`;
+}
+
 export async function submitTemplates() {
   if (config.provider !== 'meta' || !config.wa.token || !config.wa.wabaId) throw new Error('WhatsApp (WA_TOKEN, WA_WABA_ID) is not set up');
   const have = await templateStatuses(true).catch(() => ({}));
@@ -197,14 +220,7 @@ export async function submitTemplates() {
       const k = `${NAME(kind)}|${lang}`;
       if (have[k] && have[k].status !== 'REJECTED') { out.push({ name: NAME(kind), lang, result: have[k].status }); continue; }
       const def = definition(kind, lang);
-      // A rejected template is edited in place (Meta allows changing its category and text); a missing one is created.
-      const editing = have[k]?.status === 'REJECTED' && have[k].id;
-      const res = await fetch(editing ? `${config.wa.apiBase}/${have[k].id}` : `${config.wa.apiBase}/${config.wa.wabaId}/message_templates`, {
-        method: 'POST', headers: { Authorization: `Bearer ${config.wa.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(editing ? { category: def.category, components: def.components } : def), signal: AbortSignal.timeout(20000),
-      });
-      const j = await res.json().catch(() => ({}));
-      out.push({ name: NAME(kind), lang, result: res.ok ? (editing ? `resubmitted as ${def.category.toLowerCase()}` : (j.status || 'PENDING')) : `error: ${j.error?.error_user_msg || j.error?.message || res.status}` });
+      out.push({ name: NAME(kind), lang, result: await submitOne(def, have[k]) });
     }
   }
   statusCache.at = 0;
