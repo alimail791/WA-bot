@@ -379,3 +379,58 @@ test('Held back by WhatsApp 3 times: stop trying that person; fresh leads go bef
   assert.equal((await db.leads.findOne({ phone: '919777700002' })).stage, 'new');
   await leads.setCampaign({ running: false, perRound: 10 });
 });
+
+test('School lead taps "Career test demo" → sample report, class summary and pilot offer; pilot alerts the owner', async () => {
+  const ph = '919811100001';
+  await db.leads.insertOne({ phone: ph, name: 'Principal Rao', org: 'St Mary HSS', city: 'Madurai', segment: 'school', product: 'classcoach', stage: 'contacted', step: 1, sent: 1, notes: [], createdAt: new Date(), stageAt: new Date() });
+  fresh(ph); fresh('919800000001');
+  await tap(ph, 'lead:demo'); await wait(150);
+  let m = fresh(ph);
+  const t = textOf(m) + m.map((x) => x.url || '').join(' ');
+  assert.match(t, /Career Aptitude Test/);
+  assert.match(t, /sample-career-report/);
+  assert.match(t, /sample-class-summary/);
+  assert.deepEqual(ids(m).slice(-3), ['lead:pilot', 'lead:tools', 'lead:human']);
+  assert.equal((await db.leads.findOne({ phone: ph })).stage, 'demo');
+
+  await tap(ph, 'lead:pilot'); await wait(150);
+  m = fresh(ph);
+  assert.ok(m.some((x) => /signup\?next=\/career/.test(x.url || '')), 'signup link to the career test');
+  assert.equal((await db.leads.findOne({ phone: ph })).stage, 'trial');
+  assert.match(textOf(fresh('919800000001')), /School pilot started: Principal Rao/);
+
+  await tap(ph, 'lead:tools'); await wait(150);
+  m = fresh(ph);
+  assert.match(textOf(m), /OMR/);
+  assert.ok(m.some((x) => /signup\?next=\/papers/.test(x.url || '')));
+});
+
+test('"Book a free demo" message from a classcoach.in landing page → new school lead, right demo, owner alert', async () => {
+  const ph = '919811100002';
+  fresh(ph); fresh('919800000001');
+  await type(ph, "Hi, I'd like a free demo of the ClassCoach OMR sheet scanner for my school / institute."); await wait(150);
+  const m = fresh(ph);
+  assert.match(textOf(m), /OMR/);
+  assert.doesNotMatch(textOf(m), /What are you here for/);
+  const lead = await db.leads.findOne({ phone: ph });
+  assert.equal(lead.segment, 'school');
+  assert.equal(lead.source, 'website');
+  assert.equal(lead.stage, 'demo');
+  assert.match(textOf(fresh('919800000001')), /Demo request \(OMR scanner\).*classcoach\.in/);
+
+  // Typed keyword works too, and a later "Hi" goes to ClassCoach (product remembered)
+  await type(ph, 'career test'); await wait(150);
+  assert.match(textOf(fresh(ph)), /Career Aptitude Test/);
+  await type(ph, 'Hi'); await wait(150);
+  assert.doesNotMatch(textOf(fresh(ph)), /What are you here for/);
+});
+
+test('School prices list career test tiers', async () => {
+  const ph = '919811100003';
+  await db.leads.insertOne({ phone: ph, name: 'Head', org: 'Govt HSS', segment: 'school', product: 'classcoach', stage: 'replied', step: 1, sent: 1, notes: [], createdAt: new Date(), stageAt: new Date() });
+  fresh(ph);
+  await tap(ph, 'lead:prices'); await wait(150);
+  const t = textOf(fresh(ph));
+  assert.match(t, /₹599/);
+  assert.match(t, /₹199 each for 300\+/);
+});
