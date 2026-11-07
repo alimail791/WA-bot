@@ -500,7 +500,9 @@ async function startSchoolDemo(ev, focus, setPick) {
   let lead = await db.leads.findOne({ phone });
   if (!lead) {
     lead = await db.leads.insertOne({ phone, name: ev.name || '', org: '', city: '', segment: 'school', product: 'classcoach', stage: 'replied', step: 0, sent: 0, source: 'website', notes: [], owner: '', hot: false, createdAt: new Date(), stageAt: new Date(), lastInboundAt: new Date(), repliedAt: new Date() });
-  } else if (!['school', 'institute'].includes(lead.segment)) {
+  } else if (['tutor', 'student'].includes(lead.segment) && focus === 'career') {
+    // Asked about the career test: that's a school's need. NEET centres and
+    // institutes asking about papers or OMR keep their own segment.
     await db.leads.updateOne({ phone }, { $set: { segment: 'school', product: 'classcoach' } });
     lead = await db.leads.findOne({ phone });
   }

@@ -434,3 +434,12 @@ test('School prices list career test tiers', async () => {
   assert.match(t, /₹599/);
   assert.match(t, /₹199 each for 300\+/);
 });
+
+test('A NEET centre replying OMR gets the papers & OMR demo and stays a NEET centre', async () => {
+  const ph = '919811100004';
+  await db.leads.insertOne({ phone: ph, name: 'Apex', org: 'Apex NEET Academy', segment: 'neet', product: 'yneet', stage: 'contacted', step: 1, sent: 1, notes: [], createdAt: new Date(), stageAt: new Date() });
+  fresh(ph);
+  await type(ph, 'OMR'); await wait(150);
+  assert.match(textOf(fresh(ph)), /OMR: print our OMR sheet/);
+  assert.equal((await db.leads.findOne({ phone: ph })).segment, 'neet');
+});
