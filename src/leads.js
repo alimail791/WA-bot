@@ -35,7 +35,7 @@ export const SEGMENTS = {
     label: 'Schools & colleges', product: 'classcoach', template: env.LEAD_TPL_SCHOOL || 'ra_lead_school',
     match: /school|college|matric|cbse|icse|hr\.?\s*sec|higher\s*sec|polytechnic|university|vidyalaya|kendriya/i,
     buttons: ['lead:demo', 'lead:later', 'lead:stop'],
-    pitch: 'ClassCoach WhatsApp quizzes for your teachers and students',
+    pitch: 'the ClassCoach career aptitude test for Class 10 and 12, question papers and OMR checking',
   },
   institute: {
     label: 'Academies, institutes & coaching', product: 'testmandi', template: env.LEAD_TPL_INSTITUTE || 'ra_lead_institute',
@@ -314,6 +314,8 @@ export async function intercept(ev, { setPick } = {}) {
     await alertOwner(`🗑️ Data deletion request from +${phone}. Delete within 7 days and confirm to them.`, { phone });
     return true;
   }
+  const demoFocus = typed && schoolDemoFocus(typed);
+  if (demoFocus) { await startSchoolDemo(ev, demoFocus, setPick); return true; }
   if (HELP_WORDS.test(upper)) { await handover(phone, `typed "${typed}"`); return true; }
   if (upper === 'STOP' || upper === 'UNSUBSCRIBE') {
     if (await db.leads.findOne({ phone })) { await handleLeadReply(phone, 'lead:stop', { setPick, name: ev.name }); return true; }
@@ -345,7 +347,7 @@ async function leadMenu(lead, text) {
   const btns = {
     neet: [['lead:demo', '🎓 Student demo'], ['lead:sell', '💰 Sell NEET tests'], ['lead:human', '📞 Talk to us']],
     tutor: [['lead:demo', '▶️ Show me demo'], ['lead:prices', '💎 See prices'], ['lead:human', '📞 Talk to us']],
-    school: [['lead:demo', '▶️ Show me demo'], ['lead:prices', '💎 See prices'], ['lead:human', '📞 Talk to us']],
+    school: [['lead:demo', '🧭 Career test demo'], ['lead:tools', '📝 Papers & OMR'], ['lead:human', '📞 Talk to us']],
     institute: [['lead:sell', '💰 Sell my tests'], ['lead:demo:classcoach', '📝 Test my students'], ['lead:human', '📞 Talk to us']],
     student: [['lead:demo', '🧠 Try free quiz'], ['lead:prices', '💎 See plans'], ['lead:human', '📞 Talk to us']],
   }[lead.segment] || [['lead:demo', '▶️ Show me demo'], ['lead:human', '📞 Talk to us']];
@@ -388,13 +390,20 @@ async function handleLeadReply(phone, replyId, { setPick, name } = {}) {
       await advance(phone, 'demo', { demoAt: new Date(), demoProduct: 'testmandi' });
       if (setPick) await setPick(phone, 'testmandi');
       return send('testmandi', phone, { type: 'buttons', text: `💰 Sell your mock tests on TestMandi\n• You set the price, you keep ${Math.round(products.testmandi.sellerShare * 100)}% of every sale\n• Students buy on testmandi.in and right here on WhatsApp\n• Each test gets its own WhatsApp link to share with your students\n• ₹200 for every teacher or student you refer who buys\n\nHow many students do you reach (classroom + WhatsApp groups)?`, buttons: [{ id: 'lead:calc:50', title: 'About 50' }, { id: 'lead:calc:200', title: 'About 200' }, { id: 'lead:calc:1000', title: '1,000+' }] });
+    case 'pilot':
+      return schoolPilot(lead);
+    case 'tools':
+      await advance(phone, 'demo', { demoAt: new Date(), demoProduct: 'classcoach' });
+      return schoolTools(lead);
     case 'prices':
+      if (lead.segment === 'school') return schoolPrices(lead);
       if (lead.product === 'classcoach') return enter('classcoach', { replyId: 'cc:plans' });
       if (lead.product === 'yneet') return enter('yneet', { replyId: 'y:plans' });
       return earnings(lead, 200);
     case 'demo': {
       const product = arg || lead.product;
       await advance(phone, 'demo', { demoAt: new Date(), demoProduct: product });
+      if (product === 'classcoach' && lead.segment === 'school' && !arg) return schoolDemo(lead);
       if (product === 'classcoach') {
         await send('classcoach', phone, { type: 'text', text: '▶️ ClassCoach in 3 steps:\n1️⃣ Pick a subject and topic, and I make a 10-question quiz\n2️⃣ Forward one link to your class WhatsApp group\n3️⃣ Every student\'s marks come back to you here, automatically\n\nNo app, no login for students. Your 30-day free trial starts now. Let\'s make your first quiz 👇' });
         return enter('classcoach', { replyId: 'cc:new' });
@@ -410,6 +419,100 @@ async function handleLeadReply(phone, replyId, { setPick, name } = {}) {
     default:
       return leadMenu(lead, 'What would you like to see?');
   }
+}
+
+// ---- Schools: career aptitude test, question papers, OMR (classcoach.in) ---------------------
+const CC_SITE = 'https://www.classcoach.in';
+const ccButtons = (phone, text, btns) => send('classcoach', phone, { type: 'buttons', text, buttons: btns.map(([id, title]) => ({ id, title })) });
+
+export async function schoolDemo(lead, focus = 'career') {
+  if (focus === 'papers' || focus === 'omr') return schoolTools(lead);
+  await send('classcoach', lead.phone, { type: 'text', text: [
+    '🧭 ClassCoach Career Aptitude Test, for students after Class 10 and Class 12',
+    '',
+    '• 40-minute online test: aptitude, interests and work style',
+    '• After Class 10: which stream fits (PCB, PCM, Commerce, Humanities, Diploma)',
+    '• After Class 12: which courses, careers and entrance exams fit',
+    '• Each student gets a report for parents, in English or 8 Indian languages',
+    '• The principal gets a class summary and a list of students who need counselling',
+    '• Students join by link or QR code; no logins to create',
+  ].join('\n') });
+  await send('classcoach', lead.phone, { type: 'link', text: 'This is the report every student and parent gets (a sample):', url: `${CC_SITE}/sample-career-report`, label: 'See sample report' });
+  await send('classcoach', lead.phone, { type: 'link', text: 'And the one-page summary for the principal:', url: `${CC_SITE}/sample-class-summary`, label: 'See class summary' });
+  await ccButtons(lead.phone, `🎁 Try it free with one section: every new school account gets 10 free reports.\nAfter that: ₹599 per student, ₹249 for 100+ students, ₹199 for 300+.`, [['lead:pilot', '🎁 10 free reports'], ['lead:tools', '📝 Papers & OMR'], ['lead:human', '📞 Talk to us']]);
+}
+
+export async function schoolTools(lead) {
+  await send('classcoach', lead.phone, { type: 'text', text: [
+    '📝 Question papers and OMR checking in ClassCoach',
+    '',
+    '• Question papers: your school header, MCQ / short / long sections with marks, answer key, and up to 4 shuffled sets (A–D)',
+    '• Questions come from your own question bank first; AI writes only the missing ones',
+    '• OMR: print our OMR sheet, students fill it with a pen, you photograph the sheets with your phone',
+    '• Marks, roll numbers and sets are read in about a second per sheet, with negative marking if you want it',
+    '',
+    `More: ${CC_SITE}/question-paper-generator\n${CC_SITE}/omr-sheet-scanner`,
+  ].join('\n') });
+  await send('classcoach', lead.phone, { type: 'link', text: 'Free 1-month trial, no card needed. Sign up with this WhatsApp number as your phone so updates reach you here.', url: `${CC_SITE}/signup?next=/papers`, label: 'Start free trial' });
+  await ccButtons(lead.phone, 'Would you like us to set up your first paper with you?', [['lead:human', '📞 Yes, help me'], ['lead:demo', '🧭 Career test']]);
+}
+
+async function schoolPilot(lead) {
+  await advance(lead.phone, 'trial', { trialAt: new Date(), demoProduct: 'classcoach' });
+  await send('classcoach', lead.phone, { type: 'link', text: [
+    '🎁 Your 10 free career test reports',
+    '1️⃣ Sign up with this WhatsApp number as your phone',
+    '2️⃣ Open Career Test, create an assessment (Class 10 or Class 12)',
+    '3️⃣ Share the link or QR code with one section: reports come in as students finish',
+  ].join('\n'), url: `${CC_SITE}/signup?next=/career`, label: 'Get 10 free reports' });
+  await ccButtons(lead.phone, 'Want us to set it up with you on a short call?', [['lead:human', '📞 Yes, call me'], ['lead:tools', '📝 Papers & OMR']]);
+  await alertOwner(`🎁 School pilot started: ${who(lead)}${lead.city ? ' (' + lead.city + ')' : ''} tapped "10 free reports".\nChat: ${chatLink(lead.phone)}`, { phone: lead.phone });
+}
+
+async function schoolPrices(lead) {
+  await ccButtons(lead.phone, [
+    '💎 Career aptitude test, per student',
+    '• Basic ₹299: scores and a short report',
+    '• Standard ₹599: detailed report in English or an Indian language, with a parent note',
+    '   ₹249 each for 100+ students, ₹199 each for 300+',
+    '• Premium ₹999: Standard plus a 1:1 counselling session',
+    '',
+    'Question papers and OMR are part of ClassCoach plans, from ₹499 for 2 months (free 1-month trial).',
+  ].join('\n'), [['lead:pilot', '🎁 10 free reports'], ['lead:human', '📞 Talk to us']]);
+}
+
+// "Book a free demo" buttons on classcoach.in landing pages open WhatsApp with
+// "Hi, I'd like a free demo of the ClassCoach <feature> for my school / institute."
+// Typed CAREER TEST / OMR / QUESTION PAPER also land here.
+const WEB_DEMO = /free demo of the ClassCoach (.+?) for my school/i;
+export function schoolDemoFocus(text) {
+  const t = String(text || '');
+  const m = WEB_DEMO.exec(t);
+  const what = (m ? m[1] : t).toLowerCase();
+  if (!m && !/^(career( aptitude)? test|aptitude test|omr|omr scanner|question papers?|paper generator)$/i.test(t.trim())) return null;
+  if (/omr/.test(what)) return 'omr';
+  if (/paper/.test(what)) return 'papers';
+  return 'career';
+}
+
+async function startSchoolDemo(ev, focus, setPick) {
+  const phone = ev.from;
+  let lead = await db.leads.findOne({ phone });
+  if (!lead) {
+    lead = await db.leads.insertOne({ phone, name: ev.name || '', org: '', city: '', segment: 'school', product: 'classcoach', stage: 'replied', step: 0, sent: 0, source: 'website', notes: [], owner: '', hot: false, createdAt: new Date(), stageAt: new Date(), lastInboundAt: new Date(), repliedAt: new Date() });
+  } else if (['tutor', 'student'].includes(lead.segment) && focus === 'career') {
+    // Asked about the career test: that's a school's need. NEET centres and
+    // institutes asking about papers or OMR keep their own segment.
+    await db.leads.updateOne({ phone }, { $set: { segment: 'school', product: 'classcoach' } });
+    lead = await db.leads.findOne({ phone });
+  }
+  if (setPick) await setPick(phone, 'classcoach');
+  await db.users.updateOne({ product: 'classcoach', phone }, { $set: { lastInboundAt: new Date(), ...(ev.name ? { name: ev.name } : {}) }, $setOnInsert: { createdAt: new Date(), credits: {}, optedOut: false } }, { upsert: true });
+  await advance(phone, 'demo', { demoAt: new Date(), demoProduct: 'classcoach', lastInboundAt: new Date() });
+  await log('school_demo', phone, { focus, source: WEB_DEMO.test(ev.text || '') ? 'website' : 'typed' });
+  await schoolDemo(lead, focus);
+  const label = { career: 'career aptitude test', papers: 'question papers', omr: 'OMR scanner' }[focus];
+  await alertOwner(`🏫 Demo request (${label}) from ${who(lead)}${WEB_DEMO.test(ev.text || '') ? ' via classcoach.in' : ''}. The bot sent the demo; worth a call.\nChat: ${chatLink(phone)}`, { phone });
 }
 
 async function earnings(lead, students) {
@@ -428,7 +531,9 @@ function messageFor(lead, step) {
   const seg = SEGMENTS[lead.segment] || SEGMENTS.institute;
   if (step === 0) return { name: seg.template, params: [firstName(lead)], buttons: seg.buttons };
   if (step === 1) return { name: FOLLOWUP_TPL, params: [firstName(lead), seg.pitch], buttons: ['lead:demo', 'lead:human', 'lead:stop'] };
-  return { name: FINAL_TPL, params: [firstName(lead), PRODUCT_LINE[lead.product] || seg.pitch], buttons: ['lead:demo', 'lead:no'] };
+  // Schools buy the career test, papers and OMR, not WhatsApp quizzes: use their own pitch.
+  const line = lead.segment === 'school' ? seg.pitch : PRODUCT_LINE[lead.product] || seg.pitch;
+  return { name: FINAL_TPL, params: [firstName(lead), line], buttons: ['lead:demo', 'lead:no'] };
 }
 
 export async function sendStep(lead, step, { test = false } = {}) {
@@ -635,6 +740,11 @@ export async function onboardingTick(now = Date.now()) {
 
 async function nextOnboardStep(l, product, user, days, done) {
   const btn = (text, buttons) => ({ type: 'buttons', text, buttons: buttons.map(([id, title]) => ({ id, title })) });
+  if (product === 'classcoach' && l.segment === 'school') {
+    if (!done.includes('sc_d2') && days >= 2) return { id: 'sc_d2', msg: btn('👋 Did you get a chance to try the career test with one section? Your 10 free reports are waiting. We can set it up with you in 10 minutes.', [['lead:pilot', '🎁 Start the pilot'], ['lead:human', '📞 Help me']]) };
+    if (!done.includes('sc_d6') && days >= 6) return { id: 'sc_d6', last: true, msg: btn('Schools usually run the career test before Class 11 admissions and stream selection. Shall we plan it for your Class 10 and 12 students?', [['lead:prices', '💎 School prices'], ['lead:human', '📞 Plan with us'], ['lead:no', 'Not now']]) };
+    return null;
+  }
   if (product === 'classcoach') {
     const cls = await db.classes.findOne({ tutorPhone: l.phone });
     const students = cls?.students?.length || 0, quizzes = cls?.quizzes?.length || 0;
