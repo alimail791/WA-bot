@@ -529,7 +529,9 @@ function messageFor(lead, step) {
   const seg = SEGMENTS[lead.segment] || SEGMENTS.institute;
   if (step === 0) return { name: seg.template, params: [firstName(lead)], buttons: seg.buttons };
   if (step === 1) return { name: FOLLOWUP_TPL, params: [firstName(lead), seg.pitch], buttons: ['lead:demo', 'lead:human', 'lead:stop'] };
-  return { name: FINAL_TPL, params: [firstName(lead), PRODUCT_LINE[lead.product] || seg.pitch], buttons: ['lead:demo', 'lead:no'] };
+  // Schools buy the career test, papers and OMR, not WhatsApp quizzes: use their own pitch.
+  const line = lead.segment === 'school' ? seg.pitch : PRODUCT_LINE[lead.product] || seg.pitch;
+  return { name: FINAL_TPL, params: [firstName(lead), line], buttons: ['lead:demo', 'lead:no'] };
 }
 
 export async function sendStep(lead, step, { test = false } = {}) {
