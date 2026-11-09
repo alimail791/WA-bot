@@ -35,6 +35,9 @@ export function createApp() {
 
   // Public legal pages for the Meta app settings (Privacy Policy URL, User data deletion URL)
   const legal = (title, body) => shell(title, `<h1>${title}</h1><p class="muted">${config.wa.businessName} (YNeet, TestMandi, ClassCoach) · Last updated 10 October 2026</p>${body}`);
+  // pay.yneet.in pages must stay reachable (Razorpay/Meta check them) but should
+  // not show up in Google search results for YNeet.
+  app.use((_req, res, next) => { res.set('X-Robots-Tag', 'noindex, follow'); next(); });
   app.get('/', (_req, res) => res.send(homePage()));
   app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /t/\nDisallow: /pay/\n'));
   app.get('/refund', (_req, res) => res.send(refundPage()));
